@@ -1,0 +1,15 @@
+# Normalize text in the repository, check out native line endings.
+* text=auto
+
+# Windows launchers must keep CRLF or cmd.exe mis-parses multi-line blocks.
+*.bat text eol=crlf
+
+# Model artifacts and binary assets must never be line-ending converted.
+*.pkl binary
+*.joblib binary
+*.pt binary
+*.pth binary
+*.xlsx binary
+*.xls binary
+*.png binary
+*.pdf binary
