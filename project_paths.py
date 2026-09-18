@@ -27,6 +27,9 @@ LIBRARY_INDEX_PATH = MODEL_LIBRARY_ROOT / "library.json"
 #: Batch inference and validation reports.
 REPORTS_ROOT = PROJECT_ROOT / "reports"
 
+#: User preferences that are not tied to one model, such as the UI language.
+SETTINGS_PATH = PROJECT_ROOT / "settings.json"
+
 
 def ensure_folders() -> None:
     for folder in (DEFAULT_OUTPUT_ROOT, MODEL_LIBRARY_ROOT, REPORTS_ROOT):

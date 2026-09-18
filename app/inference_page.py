@@ -10,8 +10,6 @@ models rebuilds the form.
 
 from __future__ import annotations
 
-from typing import Any
-
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QDoubleValidator
 from PyQt6.QtWidgets import (
@@ -31,6 +29,8 @@ from PyQt6.QtWidgets import (
 )
 
 import numpy as np
+
+from i18n import tr
 
 from .adapters import Predictor, load_predictor
 from .model_library import ModelEntry
@@ -62,7 +62,7 @@ class FeatureRow(QWidget):
         name.setStyleSheet(f"color: {C['text']}; font-size: 13px;")
 
         self.field = QLineEdit()
-        self.field.setPlaceholderText("輸入數值…")
+        self.field.setPlaceholderText(tr("Enter a value…"))
         validator = QDoubleValidator()
         validator.setNotation(QDoubleValidator.Notation.ScientificNotation)
         self.field.setValidator(validator)
@@ -74,13 +74,19 @@ class FeatureRow(QWidget):
     def value(self) -> float:
         text = self.field.text().strip()
         if not text:
-            raise ValueError(f"「{self.feature_name}」尚未填寫")
+            raise ValueError(tr("“{name}” has not been filled in", name=self.feature_name))
         try:
             return float(text.replace(",", ""))
         except ValueError as exc:
-            raise ValueError(f"「{self.feature_name}」格式不正確：{text!r}") from exc
+            raise ValueError(
+                tr(
+                    "“{name}” is not a valid number: {value}",
+                    name=self.feature_name,
+                    value=repr(text),
+                )
+            ) from exc
 
-    def set_value(self, value: Any) -> None:
+    def set_value(self, value: object) -> None:
         self.field.setText("" if value is None else str(value))
 
     def clear(self) -> None:
@@ -103,7 +109,7 @@ class ResultCard(QFrame):
         layout.setContentsMargins(18, 14, 18, 14)
         layout.setSpacing(4)
 
-        caption = QLabel("預測目標")
+        caption = QLabel(tr("Predicted target"))
         caption.setStyleSheet(f"color: {C['muted']}; font-size: 11px; font-weight: bold;")
         name = QLabel(target_name)
         name.setWordWrap(True)
@@ -167,19 +173,19 @@ class InferencePage(QWidget):
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(10)
 
-        selector = QGroupBox("模型選擇")
-        selector_layout = QVBoxLayout(selector)
+        self.selector_box = QGroupBox(tr("Model selection"))
+        selector_layout = QVBoxLayout(self.selector_box)
         row = QHBoxLayout()
-        label = QLabel("使用模型：")
-        label.setStyleSheet(f"color: {C['muted']}; font-weight: bold;")
-        label.setFixedWidth(72)
+        self.model_caption = QLabel(tr("Model:"))
+        self.model_caption.setStyleSheet(f"color: {C['muted']}; font-weight: bold;")
+        self.model_caption.setFixedWidth(72)
         self.model_combo = QComboBox()
         self.model_combo.currentIndexChanged.connect(self._on_model_changed)
-        row.addWidget(label)
+        row.addWidget(self.model_caption)
         row.addWidget(self.model_combo, 1)
         selector_layout.addLayout(row)
 
-        self.status_label = QLabel("請先到「模型庫」勾選要使用的模型。")
+        self.status_label = QLabel(tr("Tick the models you want to use on the Model library tab."))
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet(f"color: {C['muted']}; font-size: 12px; padding: 2px 0;")
         selector_layout.addWidget(self.status_label)
@@ -188,12 +194,12 @@ class InferencePage(QWidget):
         self.metrics_label.setWordWrap(True)
         self.metrics_label.setStyleSheet(f"color: {C['warning']}; font-size: 12px;")
         selector_layout.addWidget(self.metrics_label)
-        layout.addWidget(selector)
+        layout.addWidget(self.selector_box)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        input_box = QGroupBox("輸入特徵值")
-        input_layout = QVBoxLayout(input_box)
+        self.input_box = QGroupBox(tr("Input feature values"))
+        input_layout = QVBoxLayout(self.input_box)
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setMinimumHeight(260)
@@ -206,30 +212,46 @@ class InferencePage(QWidget):
         input_layout.addWidget(self.scroll, 1)
 
         buttons = QHBoxLayout()
-        self.predict_button = QPushButton("🔮  預測")
+        self.predict_button = QPushButton(tr("🔮  Predict"))
         self.predict_button.setEnabled(False)
         self.predict_button.setMinimumHeight(42)
         self.predict_button.clicked.connect(self.run_inference)
-        clear_button = QPushButton("🗑 清除")
-        clear_button.setObjectName("secondaryBtn")
-        clear_button.setFixedWidth(96)
-        clear_button.clicked.connect(self.clear_inputs)
+        self.clear_button = QPushButton(tr("🗑 Clear"))
+        self.clear_button.setObjectName("secondaryBtn")
+        self.clear_button.setFixedWidth(110)
+        self.clear_button.clicked.connect(self.clear_inputs)
         buttons.addWidget(self.predict_button, 1)
-        buttons.addWidget(clear_button)
+        buttons.addWidget(self.clear_button)
         input_layout.addLayout(buttons)
-        splitter.addWidget(input_box)
+        splitter.addWidget(self.input_box)
 
-        result_box = QGroupBox("推論結果")
-        self.result_layout = QVBoxLayout(result_box)
+        self.result_box = QGroupBox(tr("Prediction"))
+        self.result_layout = QVBoxLayout(self.result_box)
         self.result_layout.setSpacing(10)
         self.result_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self.result_hint = QLabel("等待推論…")
+        self.result_hint = QLabel(tr("Waiting for a prediction…"))
         self.result_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.result_hint.setStyleSheet(f"color: {C['muted']}; font-size: 14px; padding: 50px 16px;")
         self.result_layout.addWidget(self.result_hint)
-        splitter.addWidget(result_box)
+        splitter.addWidget(self.result_box)
         splitter.setSizes([700, 420])
         layout.addWidget(splitter, 1)
+
+    def retranslate(self) -> None:
+        """Re-apply every static string after a language change."""
+
+        self.selector_box.setTitle(tr("Model selection"))
+        self.model_caption.setText(tr("Model:"))
+        self.input_box.setTitle(tr("Input feature values"))
+        self.result_box.setTitle(tr("Prediction"))
+        self.predict_button.setText(tr("🔮  Predict"))
+        self.clear_button.setText(tr("🗑 Clear"))
+        self.result_hint.setText(tr("Waiting for a prediction…"))
+        for row in self.feature_rows:
+            row.field.setPlaceholderText(tr("Enter a value…"))
+        # The model list and the status line are derived, so rebuilding the
+        # list is what re-renders them in the new language.
+        self.set_entries(self.entries)
 
     # ----------------------------------------------------------- population
     def set_entries(self, entries: list[ModelEntry]) -> None:
@@ -239,7 +261,7 @@ class InferencePage(QWidget):
         self.entries = list(entries)
         self.model_combo.blockSignals(True)
         self.model_combo.clear()
-        self.model_combo.addItem("— 請選擇模型 —", None)
+        self.model_combo.addItem(tr("— select a model —"), None)
         current_run = ""
         for entry in self.entries:
             if entry.run_label != current_run:
@@ -252,11 +274,16 @@ class InferencePage(QWidget):
 
         if not self.entries:
             self.status_label.setText(
-                "目前沒有已勾選且可執行的模型。請到「模型庫」分頁勾選，或先完成一次訓練。"
+                tr(
+                    "No model is both ticked and runnable. Tick one on the Model library "
+                    "tab, or run a training pass first."
+                )
             )
             self._clear_form()
         elif index <= 0:
-            self.status_label.setText(f"可用模型 {len(self.entries)} 個，請選擇一個開始推論。")
+            self.status_label.setText(
+                tr("{count} model(s) available — pick one to start.", count=len(self.entries))
+            )
         else:
             self._on_model_changed(self.model_combo.currentIndex())
 
@@ -274,7 +301,7 @@ class InferencePage(QWidget):
             return
         self.current_entry = entry
         self.predict_button.setEnabled(False)
-        self._set_status("⏳ 載入模型中…", C["muted"])
+        self._set_status(tr("⏳ Loading the model…"), C["muted"])
         self.loader = LoadWorker(str(entry.path))
         self.loader.loaded.connect(self._on_loaded)
         self.loader.failed.connect(self._on_load_failed)
@@ -285,11 +312,16 @@ class InferencePage(QWidget):
         entry = self.current_entry
         self._rebuild_form(predictor)
         self.predict_button.setEnabled(True)
-        notes = f"（{'; '.join(predictor.notes)}）" if predictor.notes else ""
+        notes = f" ({'; '.join(predictor.notes)})" if predictor.notes else ""
         self._set_status(
-            f"✅ 已載入：{predictor.architecture or predictor.kind}　"
-            f"輸入 {len(predictor.feature_names)}　輸出 {len(predictor.target_names)}　"
-            f"裝置 {predictor.device}{notes}",
+            tr(
+                "✅ Loaded {architecture} — {inputs} input(s), {outputs} output(s), on {device}",
+                architecture=predictor.architecture or predictor.kind,
+                inputs=len(predictor.feature_names),
+                outputs=len(predictor.target_names),
+                device=predictor.device,
+            )
+            + notes,
             C["success"],
         )
         if entry and entry.metrics:
@@ -302,17 +334,20 @@ class InferencePage(QWidget):
                 if key in entry.metrics:
                     parts.append(f"{key.upper()}={entry.metrics[key]:.6g}")
             self.metrics_label.setText(
-                "訓練時記錄的評估指標： " + "　".join(parts)
-                + "　（來自該模型的評估階段，不是本次輸入的準確度）"
+                tr(
+                    "Metrics recorded when this model was evaluated: {metrics} "
+                    "(from its evaluation stage, not the accuracy of this input)",
+                    metrics="   ".join(parts),
+                )
             )
         else:
-            self.metrics_label.setText("這個模型沒有記錄評估指標。")
+            self.metrics_label.setText(tr("This model has no recorded evaluation metrics."))
 
     def _on_load_failed(self, message: str) -> None:
         self.predictor = None
         self._clear_form()
         self.predict_button.setEnabled(False)
-        self._set_status(f"❌ 載入失敗：{message}", C["error"])
+        self._set_status(tr("❌ Loading failed: {error}", error=message), C["error"])
 
     # ----------------------------------------------------------------- form
     def _rebuild_form(self, predictor: Predictor) -> None:
@@ -364,12 +399,12 @@ class InferencePage(QWidget):
         try:
             values = [row.value() for row in self.feature_rows]
         except ValueError as exc:
-            QMessageBox.warning(self, "輸入錯誤", str(exc))
+            QMessageBox.warning(self, tr("Invalid input"), str(exc))
             return
         try:
             prediction = self.predictor.predict(np.asarray([values], dtype=float))
         except Exception as exc:
-            QMessageBox.critical(self, "推論錯誤", f"{type(exc).__name__}: {exc}")
+            QMessageBox.critical(self, tr("Inference error"), f"{type(exc).__name__}: {exc}")
             return
         for index, card in enumerate(self.result_cards):
             card.show_value(float(prediction[0, index]))

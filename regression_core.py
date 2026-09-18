@@ -36,7 +36,7 @@ from sklearn.preprocessing import MinMaxScaler, RobustScaler, StandardScaler
 
 FORCE_CPU = os.environ.get("REGRESSION_FORCE_CPU", "").strip() == "1"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() and not FORCE_CPU else "cpu")
-EXECUTION_MODE_LABEL = "GPU模式" if DEVICE.type == "cuda" else "CPU模式"
+EXECUTION_MODE_LABEL = "GPU mode" if DEVICE.type == "cuda" else "CPU mode"
 DEFAULT_SEED = 42
 SHEET_ROLE_LABELS = ["Skip", "Input", "Output", "Input or Output"]
 COLUMN_ROLE_LABELS = ["Skip", "Combined Input", "Output", "Input or Output"]

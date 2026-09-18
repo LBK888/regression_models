@@ -32,6 +32,8 @@ from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np
 import pandas as pd
 
+from i18n import tr
+
 from .batch import BatchResult, rank_results
 
 
@@ -86,12 +88,14 @@ def _scatter_panels(results: Sequence[BatchResult], folder: Path) -> list[tuple[
                 f"{target}\nR²={per_target['reported_r2']:.4f} · MAE={per_target['mae']:.4g}",
                 fontsize=10,
             )
-            axis.set_xlabel("Actual")
-            axis.set_ylabel("Predicted")
+            axis.set_xlabel(tr("Actual"))
+            axis.set_ylabel(tr("Predicted"))
             axis.legend(fontsize=8, loc="upper left")
         for position in range(len(targets), rows * columns):
             axes[position // columns][position % columns].axis("off")
-        figure.suptitle(f"Predicted vs actual — {result.model_label}", fontsize=12)
+        figure.suptitle(
+            tr("Predicted vs actual — {model}", model=result.model_label), fontsize=12
+        )
         figure.tight_layout()
         path = folder / f"predicted_vs_actual_{index:02d}.png"
         figure.savefig(path, dpi=150)
@@ -114,14 +118,14 @@ def _residual_panels(results: Sequence[BatchResult], folder: Path) -> list[tuple
         axes[1].scatter(result.predictions.ravel(), residuals, s=20, alpha=0.6,
                         label=result.model_label, edgecolor="none")
     axes[0].axvline(0.0, linestyle="--", linewidth=1.0, color="#888888")
-    axes[0].set_title("Residual distribution")
-    axes[0].set_xlabel("Actual − Predicted")
-    axes[0].set_ylabel("Count")
+    axes[0].set_title(tr("Residual distribution"))
+    axes[0].set_xlabel(tr("Actual − Predicted"))
+    axes[0].set_ylabel(tr("Count"))
     axes[0].legend(fontsize=8)
     axes[1].axhline(0.0, linestyle="--", linewidth=1.0, color="#888888")
-    axes[1].set_title("Residual vs predicted")
-    axes[1].set_xlabel("Predicted")
-    axes[1].set_ylabel("Residual")
+    axes[1].set_title(tr("Residual vs predicted"))
+    axes[1].set_xlabel(tr("Predicted"))
+    axes[1].set_ylabel(tr("Residual"))
     axes[1].legend(fontsize=8)
     figure.tight_layout()
     path = folder / "residual_diagnostics.png"
@@ -139,9 +143,13 @@ def _comparison_bars(results: Sequence[BatchResult], folder: Path) -> list[tuple
     labels = [result.model_label for result in results]
     positions = np.arange(len(labels))
     for key, title, values in (
-        ("nmae", "Macro NMAE (lower is better)", [r.metrics.nmae for r in results]),
-        ("reported_r2", "Reported R² (higher is better)", [r.metrics.reported_r2 for r in results]),
-        ("mape", "MAPE % (descriptive only)", [r.metrics.mape_percent for r in results]),
+        ("nmae", tr("Macro NMAE (lower is better)"), [r.metrics.nmae for r in results]),
+        (
+            "reported_r2",
+            tr("Reported R² (higher is better)"),
+            [r.metrics.reported_r2 for r in results],
+        ),
+        ("mape", tr("MAPE % (descriptive only)"), [r.metrics.mape_percent for r in results]),
     ):
         figure, axis = _figure(max(7.0, 1.6 * len(labels)), 4.6)
         axis.bar(positions, values, color="#5b6ef5")
@@ -164,37 +172,71 @@ def _markdown(
     context: dict[str, Any],
 ) -> str:
     lines: list[str] = []
-    lines.append("# 批次推論與驗證報告")
+    lines.append("# " + tr("Batch inference and validation report"))
     lines.append("")
-    lines.append(f"- 產生時間：{context['generated_at']}")
-    lines.append(f"- 資料來源：`{context['source_path']}`")
-    lines.append(f"- 工作表：`{context['sheet']}`（共 {context['total_rows']:,} 列）")
-    lines.append(f"- 參與模型：{len(results)} 個")
+    lines.append("- " + tr("Generated: {timestamp}", timestamp=context["generated_at"]))
+    lines.append("- " + tr("Source: `{path}`", path=context["source_path"]))
+    lines.append(
+        "- "
+        + tr(
+            "Worksheet: `{sheet}` ({rows:,} rows)",
+            sheet=context["sheet"],
+            rows=context["total_rows"],
+        )
+    )
+    lines.append("- " + tr("Models in this run: {count}", count=len(results)))
     lines.append("")
 
-    lines.append("## 證據界線")
+    lines.append("## " + tr("Evidence boundary"))
     lines.append("")
     if ranked:
         lines.append(
-            "以下指標是模型對本表格的預測與表格內 ground truth 的比較。"
-            "只有當這些觀測值**從未參與該模型的訓練或調參**時，這些數字才構成獨立的泛化證據；"
-            "若本表格與訓練資料重疊，請把它視為重現性檢查而非新的證據。"
+            tr(
+                "The metrics below compare each model's predictions against the ground "
+                "truth in this table. They are independent generalization evidence only "
+                "if these observations **never took part in that model's training or "
+                "tuning**. If this table overlaps the training data, read it as a "
+                "reproducibility check rather than as new evidence."
+            )
         )
     else:
         lines.append(
-            "本次沒有可用的 ground truth 欄位，因此只輸出預測值，不計算任何驗證指標。"
+            tr(
+                "No usable ground-truth column was mapped, so this run reports "
+                "predictions only and computes no validation metrics."
+            )
         )
     lines.append("")
     lines.append(
-        "Reported R² 已在 0 截斷：0 代表模型沒有勝過「一律預測平均值」的基準。"
-        "Diagnostic R² 保留負值供診斷。MAPE 只作描述用，當真值接近 0 時會失真，因此不作為排名依據。"
+        tr(
+            "Reported R² is clamped at 0: a 0 means the model did not beat the "
+            "always-predict-the-mean baseline. Diagnostic R² keeps negative values for "
+            "diagnosis. MAPE is descriptive only — it distorts as the true value "
+            "approaches 0 — so it is never used for ranking."
+        )
     )
     lines.append("")
 
     if ranked:
-        lines.append("## 模型比較（依 macro NMAE 排名）")
+        lines.append("## " + tr("Model comparison (ranked by macro NMAE)"))
         lines.append("")
-        lines.append("| 排名 | 模型 | 列數 | NMAE | MAE | RMSE | MAPE % | Reported R² | Diagnostic R² |")
+        lines.append(
+            "| "
+            + " | ".join(
+                (
+                    tr("Rank"),
+                    tr("Model"),
+                    tr("Rows"),
+                    "NMAE",
+                    "MAE",
+                    "RMSE",
+                    "MAPE %",
+                    tr("Reported R²"),
+                    tr("Diagnostic R²"),
+                )
+            )
+            + " |"
+        )
         lines.append("| ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
         for rank, result in enumerate(ranked, start=1):
             metrics = result.metrics
@@ -208,9 +250,24 @@ def _markdown(
     if metric_frame is not None and not metric_frame.empty:
         per_target = metric_frame[metric_frame["target"] != "ALL (macro)"]
         if not per_target.empty:
-            lines.append("## 各目標指標")
+            lines.append("## " + tr("Per-target metrics"))
             lines.append("")
-            lines.append("| 模型 | 目標 | MAE | RMSE | NMAE | MAPE % | Reported R² | Diagnostic R² |")
+            lines.append(
+                "| "
+                + " | ".join(
+                    (
+                        tr("Model"),
+                        tr("Target"),
+                        "MAE",
+                        "RMSE",
+                        "NMAE",
+                        "MAPE %",
+                        tr("Reported R²"),
+                        tr("Diagnostic R²"),
+                    )
+                )
+                + " |"
+            )
             lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |")
             for _index, row in per_target.iterrows():
                 lines.append(
@@ -220,12 +277,27 @@ def _markdown(
                 )
             lines.append("")
 
-    lines.append("## 資料處理稽核")
+    lines.append("## " + tr("Data handling audit"))
     lines.append("")
-    lines.append("| 模型 | 表格列數 | 實際使用 | 輸入缺失略過 | Ground truth 缺失 | 狀態 |")
+    lines.append(
+        "| "
+        + " | ".join(
+            (
+                tr("Model"),
+                tr("Table rows"),
+                tr("Rows used"),
+                tr("Skipped: input missing"),
+                tr("Ground truth missing"),
+                tr("Status"),
+            )
+        )
+        + " |"
+    )
     lines.append("| --- | ---: | ---: | ---: | ---: | --- |")
     for result in results:
-        status = result.error or ("已驗證" if result.has_validation else "僅預測")
+        status = result.error or (
+            tr("validated") if result.has_validation else tr("predictions only")
+        )
         lines.append(
             f"| {result.model_label} | {result.total_rows:,} | {result.used_rows:,} | "
             f"{result.dropped_missing_features:,} | {result.dropped_missing_targets:,} | {status} |"
@@ -234,26 +306,34 @@ def _markdown(
 
     notes = [(result.model_label, note) for result in results for note in result.notes]
     if notes:
-        lines.append("### 備註")
+        lines.append("### " + tr("Notes"))
         lines.append("")
         for label, note in notes:
             lines.append(f"- **{label}**：{note}")
         lines.append("")
 
     if figure_paths:
-        lines.append("## 圖表")
+        lines.append("## " + tr("Figures"))
         lines.append("")
         for path in figure_paths:
             lines.append(f"![{path.stem}]({path.name})")
             lines.append("")
 
-    lines.append("## 機器可讀附錄")
+    lines.append("## " + tr("Machine-readable appendix"))
     lines.append("")
-    lines.append("- `predictions.csv`：每列每個目標的預測值、真值與殘差")
-    lines.append("- `predictions_wide.csv`：每個觀測一列，可直接貼回原表")
+    lines.append(
+        "- `predictions.csv`: "
+        + tr("predicted value, actual value and residual per row and target")
+    )
+    lines.append(
+        "- `predictions_wide.csv`: "
+        + tr("one row per observation, ready to paste back into the sheet")
+    )
     if metric_frame is not None and not metric_frame.empty:
-        lines.append("- `metrics.csv`：macro 與各目標指標")
-    lines.append("- `manifest.json`：執行環境、模型清單與欄位對應")
+        lines.append("- `metrics.csv`: " + tr("macro and per-target metrics"))
+    lines.append(
+        "- `manifest.json`: " + tr("runtime, model list and column mapping")
+    )
     lines.append("")
     return "\n".join(lines)
 

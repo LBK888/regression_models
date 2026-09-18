@@ -44,6 +44,7 @@ import torch.nn as nn
 
 import legacy_architectures
 import regression_core
+from i18n import tr
 
 
 MODEL_SUFFIXES = (".joblib", ".pkl", ".pickle", ".pt", ".pth")
@@ -344,18 +345,28 @@ class Predictor:
             features = features.reshape(1, -1)
         if features.shape[1] != len(self.feature_names):
             raise ValueError(
-                f"Expected {len(self.feature_names)} features, received {features.shape[1]}"
+                tr(
+                    "Expected {expected} features, received {received}",
+                    expected=len(self.feature_names),
+                    received=features.shape[1],
+                )
             )
         prediction = np.asarray(self._call(features), dtype=float)
         if prediction.ndim == 1:
             prediction = prediction.reshape(-1, 1)
         if prediction.shape[0] != features.shape[0]:
-            raise ValueError("The model returned a different number of rows than it was given")
+            raise ValueError(
+                tr("The model returned a different number of rows than it was given")
+            )
         expected = len(self.target_names)
         if prediction.shape[1] != expected:
             raise ValueError(
-                f"The model returned {prediction.shape[1]} output column(s) but "
-                f"{expected} target name(s) are recorded"
+                tr(
+                    "The model returned {returned} output column(s) but {expected} "
+                    "target name(s) are recorded",
+                    returned=prediction.shape[1],
+                    expected=expected,
+                )
             )
         return prediction
 
@@ -399,7 +410,7 @@ def _v4_predictor(bundle: Any) -> Predictor:
 
 def _legacy_predictor(package: dict[str, Any], path: Path, sidecar: dict[str, Any]) -> Predictor:
     if "model_state_dict" not in package:
-        raise ModelLoadError("the pickle has no 'model_state_dict' entry")
+        raise ModelLoadError(tr("the pickle has no 'model_state_dict' entry"))
     state_dict = package["model_state_dict"]
     scaler = package.get("scaler")
     feature_names = _names(
@@ -413,7 +424,9 @@ def _legacy_predictor(package: dict[str, Any], path: Path, sidecar: dict[str, An
         "target_",
     )
     if not feature_names:
-        raise ModelLoadError("no feature names or input_dim were recorded in the package or its .md")
+        raise ModelLoadError(
+            tr("no feature names or input_dim were recorded in the package or its .md")
+        )
 
     input_dim = int(package.get("input_dim") or len(feature_names))
     output_dim = int(package.get("output_dim") or len(target_names))
@@ -452,9 +465,13 @@ def _legacy_predictor(package: dict[str, Any], path: Path, sidecar: dict[str, An
 
     if module is None:
         raise ModelLoadError(
-            f"no known architecture accepts this state dict (recorded name "
-            f"{architecture_name or 'unknown'!r}; tried {len(tried)} candidate class(es)). "
-            "Put a matching class in an architectures.py file next to the model."
+            tr(
+                "no known architecture accepts this state dict (recorded name "
+                "{name}; tried {count} candidate class(es)). Put a matching class in "
+                "an architectures.py file next to the model.",
+                name=repr(architecture_name or "unknown"),
+                count=len(tried),
+            )
         )
     module.eval()
 
@@ -469,11 +486,11 @@ def _legacy_predictor(package: dict[str, Any], path: Path, sidecar: dict[str, An
             output = y_scaler.inverse_transform(np.atleast_2d(output))
         return output
 
-    notes = [f"architecture={label}"]
+    notes = [tr("architecture={name}", name=label)]
     if scaler is not None:
-        notes.append(f"scaler={type(scaler).__name__}")
+        notes.append(tr("scaler={name}", name=type(scaler).__name__))
     else:
-        notes.append("no scaler stored; raw feature values are fed to the network")
+        notes.append(tr("no scaler stored; raw feature values are fed to the network"))
     return Predictor(
         kind="legacy_package",
         feature_names=feature_names,
@@ -488,7 +505,10 @@ def _legacy_predictor(package: dict[str, Any], path: Path, sidecar: dict[str, An
 def _estimator_predictor(estimator: Any, sidecar: dict[str, Any], kind: str) -> Predictor:
     if not hasattr(estimator, "predict"):
         raise ModelLoadError(
-            f"loaded a {type(estimator).__name__} which exposes no predict() method"
+            tr(
+                "loaded a {type_name} which exposes no predict() method",
+                type_name=type(estimator).__name__,
+            )
         )
     recorded_features = sidecar.get("feature_labels") or sidecar.get("feature_names")
     attribute_names = getattr(estimator, "feature_names_in_", None)
@@ -501,8 +521,11 @@ def _estimator_predictor(estimator: Any, sidecar: dict[str, Any], kind: str) -> 
         feature_count = int(getattr(estimator, "n_features_in_", 0) or 0)
         if feature_count < 1:
             raise ModelLoadError(
-                "the number of input features is unknown: the estimator exposes neither "
-                "feature_names_in_ nor n_features_in_, and no sidecar .meta.json records them"
+                tr(
+                    "the number of input features is unknown: the estimator exposes "
+                    "neither feature_names_in_ nor n_features_in_, and no sidecar "
+                    ".meta.json records them"
+                )
             )
     feature_names = _names(recorded_features, feature_count, "feature_")
 
@@ -513,7 +536,9 @@ def _estimator_predictor(estimator: Any, sidecar: dict[str, Any], kind: str) -> 
         try:
             probe_output = np.atleast_2d(np.asarray(estimator.predict(probe), dtype=float))
         except Exception as exc:
-            raise ModelLoadError(f"a trial prediction failed: {exc}") from exc
+            raise ModelLoadError(
+                tr("a trial prediction failed: {error}", error=str(exc))
+            ) from exc
         target_count = int(probe_output.shape[1])
     target_names = _names(recorded_targets, target_count, "target_")
 
@@ -531,7 +556,9 @@ def _estimator_predictor(estimator: Any, sidecar: dict[str, Any], kind: str) -> 
 
     notes: list[str] = []
     if not (sidecar.get("feature_labels") or sidecar.get("feature_names")) and attribute_names is None:
-        notes.append("feature names were not recorded; placeholder names are shown in order")
+        notes.append(
+            tr("feature names were not recorded; placeholder names are shown in order")
+        )
     return Predictor(
         kind=kind,
         feature_names=feature_names,
@@ -548,7 +575,7 @@ def _wrapped_estimator(payload: dict[str, Any], sidecar: dict[str, Any]) -> Pred
     estimator = payload.get("model") or payload.get("estimator") or payload.get("regressor")
     if estimator is None:
         raise ModelLoadError(
-            "the pickled dict has neither 'model_state_dict' nor a 'model'/'estimator' entry"
+            tr("the pickled dict has neither 'model_state_dict' nor a 'model'/'estimator' entry")
         )
     merged = dict(sidecar)
     merged.setdefault("feature_names", payload.get("feature_names"))
@@ -567,7 +594,7 @@ def load_predictor(path: str | Path) -> Predictor:
 
     model_path = Path(path)
     if not model_path.exists():
-        raise ModelLoadError("the file no longer exists")
+        raise ModelLoadError(tr("the file no longer exists"))
     sidecar = read_sidecar(model_path)
     suffix = model_path.suffix.lower()
 
@@ -575,17 +602,21 @@ def load_predictor(path: str | Path) -> Predictor:
         try:
             payload = torch.load(model_path, map_location="cpu", weights_only=False)
         except Exception as exc:
-            raise ModelLoadError(f"torch.load failed: {exc}") from exc
+            raise ModelLoadError(tr("torch.load failed: {error}", error=str(exc))) from exc
         if isinstance(payload, nn.Module):
             raise ModelLoadError(
-                "a bare nn.Module was saved without feature/target names; save a "
-                "regression_v4 bundle or add a sidecar .meta.json"
+                tr(
+                    "a bare nn.Module was saved without feature/target names; save a "
+                    "regression_v4 bundle or add a sidecar .meta.json"
+                )
             )
         if isinstance(payload, dict) and "model_state_dict" in payload:
             return _legacy_predictor(payload, model_path, sidecar)
         if isinstance(payload, dict):
             return _legacy_predictor({"model_state_dict": payload, **sidecar}, model_path, sidecar)
-        raise ModelLoadError(f"unsupported .pt payload of type {type(payload).__name__}")
+        raise ModelLoadError(
+            tr("unsupported .pt payload of type {type_name}", type_name=type(payload).__name__)
+        )
 
     if suffix == ".joblib":
         try:
@@ -593,14 +624,14 @@ def load_predictor(path: str | Path) -> Predictor:
 
             payload = joblib.load(model_path)
         except Exception as exc:
-            raise ModelLoadError(f"joblib.load failed: {exc}") from exc
+            raise ModelLoadError(tr("joblib.load failed: {error}", error=str(exc))) from exc
     elif suffix in {".pkl", ".pickle"}:
         try:
             payload = _load_pickle(model_path)
         except Exception as exc:
-            raise ModelLoadError(f"pickle.load failed: {exc}") from exc
+            raise ModelLoadError(tr("pickle.load failed: {error}", error=str(exc))) from exc
     else:
-        raise ModelLoadError(f"unsupported file type {suffix!r}")
+        raise ModelLoadError(tr("unsupported file type {suffix}", suffix=repr(suffix)))
 
     if _is_v4_bundle(payload):
         return _v4_predictor(payload)

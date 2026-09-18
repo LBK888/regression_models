@@ -21,6 +21,7 @@ import json
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Sequence
 
+from i18n import tr
 from project_paths import (
     DEFAULT_OUTPUT_ROOT,
     LIBRARY_INDEX_PATH,
@@ -61,13 +62,13 @@ class ModelEntry:
     trained_at: str = ""
     size_bytes: int = 0
     compatible: bool = False
-    reason: str = "尚未檢查"
+    reason: str = "not probed yet"
     probed: bool = False
     meta: dict[str, Any] = field(default_factory=dict)
 
     @property
     def kind_label(self) -> str:
-        return KIND_LABELS.get(self.kind, self.kind or "未知")
+        return tr(KIND_LABELS.get(self.kind, self.kind or "unknown"))
 
     @property
     def reported_r2(self) -> float | None:
@@ -115,9 +116,13 @@ def _run_label_for(path: Path, meta: Mapping[str, Any]) -> tuple[str, str]:
         try:
             relative = resolved.relative_to(MODEL_LIBRARY_ROOT.resolve())
         except ValueError:
-            return (recorded or "外部路徑", str(resolved.parent))
+            return (recorded or tr("External path"), str(resolved.parent))
         folder = relative.parent.as_posix()
-        label = recorded or (f"模型庫／{folder}" if folder not in {"", "."} else "模型庫")
+        label = recorded or (
+            tr("Model library / {folder}", folder=folder)
+            if folder not in {"", "."}
+            else tr("Model library")
+        )
         return (label, str(resolved.parent))
     run_folder = relative.parts[0] if relative.parts else resolved.parent.name
     return (recorded or run_folder, str((DEFAULT_OUTPUT_ROOT / run_folder).resolve()))
@@ -341,14 +346,26 @@ def probe_entry(entry: ModelEntry) -> tuple[ModelEntry, Predictor | None]:
     try:
         predictor = load_predictor(entry.path)
     except ModelLoadError as exc:
-        return replace(entry, compatible=False, probed=True, reason=f"不相容：{exc}"), None
+        return (
+            replace(
+                entry,
+                compatible=False,
+                probed=True,
+                reason=tr("Incompatible: {reason}", reason=str(exc)),
+            ),
+            None,
+        )
     except Exception as exc:  # a third-party pickle can fail in any way
         return (
             replace(
                 entry,
                 compatible=False,
                 probed=True,
-                reason=f"不相容：載入時發生 {type(exc).__name__}: {exc}",
+                reason=tr(
+                    "Incompatible: loading raised {error_type}: {error}",
+                    error_type=type(exc).__name__,
+                    error=str(exc),
+                ),
             ),
             None,
         )
@@ -360,7 +377,11 @@ def probe_entry(entry: ModelEntry) -> tuple[ModelEntry, Predictor | None]:
         target_names=predictor.target_names,
         compatible=True,
         probed=True,
-        reason="可執行" + (f"（{'; '.join(predictor.notes)}）" if predictor.notes else ""),
+        reason=(
+            tr("Runnable ({notes})", notes="; ".join(predictor.notes))
+            if predictor.notes
+            else tr("Runnable")
+        ),
     )
     if not updated.display_name:
         updated.display_name = updated.default_name or entry.path.stem

@@ -35,6 +35,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from i18n import tr
 from project_paths import MODEL_LIBRARY_ROOT, ensure_folders
 
 from .adapters import MODEL_SUFFIXES
@@ -42,17 +43,23 @@ from .model_library import LibraryIndex, ModelEntry, build_entry, discover_model
 from .theme import C
 
 
-COLUMNS = (
-    "名稱 / Run",
-    "使用",
-    "模型",
-    "R²",
-    "MAPE %",
-    "輸入",
-    "輸出",
-    "類型",
-    "狀態",
-)
+def column_labels() -> tuple[str, ...]:
+    """Header labels, resolved on each build so a language switch re-renders them."""
+
+    return (
+        tr("Name / Run"),
+        tr("Use"),
+        tr("Model"),
+        "R²",
+        "MAPE %",
+        tr("Inputs"),
+        tr("Outputs"),
+        tr("Kind"),
+        tr("Status"),
+    )
+
+
+COLUMN_COUNT = 9
 
 _ENTRY_ROLE = Qt.ItemDataRole.UserRole + 1
 _RUN_ROLE = Qt.ItemDataRole.UserRole + 2
@@ -104,54 +111,61 @@ class LibraryPage(QWidget):
         layout.setSpacing(10)
 
         header = QHBoxLayout()
-        title = QLabel("模型庫")
-        title.setStyleSheet(f"color: {C['accent2']}; font-size: 18px; font-weight: bold;")
-        self.status_label = QLabel("尚未掃描")
+        self.title_label = QLabel(tr("Model library"))
+        self.title_label.setStyleSheet(
+            f"color: {C['accent2']}; font-size: 18px; font-weight: bold;"
+        )
+        self.status_label = QLabel(tr("Not scanned yet"))
         self.status_label.setStyleSheet(f"color: {C['muted']};")
-        header.addWidget(title)
+        header.addWidget(self.title_label)
         header.addWidget(self.status_label, 1)
 
-        self.rescan_button = QPushButton("🔄 重新掃描")
+        self.rescan_button = QPushButton(tr("🔄 Rescan"))
         self.rescan_button.setObjectName("secondaryBtn")
         self.rescan_button.clicked.connect(self.refresh)
-        self.import_button = QPushButton("➕ 匯入模型檔")
+        self.import_button = QPushButton(tr("➕ Import model files"))
         self.import_button.setObjectName("secondaryBtn")
         self.import_button.clicked.connect(self.import_models)
         header.addWidget(self.import_button)
         header.addWidget(self.rescan_button)
         layout.addLayout(header)
 
-        hint = QLabel(
-            "在這裡為 run 與模型命名、勾選要在推論頁面看到的模型。"
-            "第三方或舊格式模型也會列出；無法執行的會在「狀態」欄說明原因。"
+        self.hint_label = QLabel(
+            tr(
+                "Name your runs and models here, and tick the ones you want to see on "
+                "the inference tabs. Third-party and legacy models are listed too; "
+                "anything that cannot run says why in the Status column."
+            )
         )
-        hint.setWordWrap(True)
-        hint.setStyleSheet(f"color: {C['muted']}; font-size: 12px;")
-        layout.addWidget(hint)
+        self.hint_label.setWordWrap(True)
+        self.hint_label.setStyleSheet(f"color: {C['muted']}; font-size: 12px;")
+        layout.addWidget(self.hint_label)
 
         tools = QHBoxLayout()
         self.filter_edit = QLineEdit()
-        self.filter_edit.setPlaceholderText("篩選 run、模型名稱、目標或狀態…")
+        self.filter_edit.setPlaceholderText(
+            tr("Filter by run, model name, target or status…")
+        )
         self.filter_edit.textChanged.connect(self._apply_filter)
-        self.only_usable_check = QCheckBox("只顯示可執行的模型")
+        self.only_usable_check = QCheckBox(tr("Show runnable models only"))
         self.only_usable_check.toggled.connect(self._apply_filter)
-        select_all = QPushButton("全部勾選")
-        select_all.setObjectName("secondaryBtn")
-        select_all.clicked.connect(lambda: self._set_all_enabled(True))
-        select_none = QPushButton("全部取消")
-        select_none.setObjectName("secondaryBtn")
-        select_none.clicked.connect(lambda: self._set_all_enabled(False))
+        self.enable_all_button = QPushButton(tr("Tick all"))
+        self.enable_all_button.setObjectName("secondaryBtn")
+        self.enable_all_button.clicked.connect(lambda: self._set_all_enabled(True))
+        self.disable_all_button = QPushButton(tr("Untick all"))
+        self.disable_all_button.setObjectName("secondaryBtn")
+        self.disable_all_button.clicked.connect(lambda: self._set_all_enabled(False))
         tools.addWidget(self.filter_edit, 1)
         tools.addWidget(self.only_usable_check)
-        tools.addWidget(select_all)
-        tools.addWidget(select_none)
+        tools.addWidget(self.enable_all_button)
+        tools.addWidget(self.disable_all_button)
         layout.addLayout(tools)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
 
         self.tree = QTreeWidget()
-        self.tree.setColumnCount(len(COLUMNS))
-        self.tree.setHeaderLabels(COLUMNS)
+        self.tree.setColumnCount(COLUMN_COUNT)
+        self.tree.setHeaderLabels(column_labels())
         self.tree.setAlternatingRowColors(True)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.tree.setEditTriggers(
@@ -165,26 +179,57 @@ class LibraryPage(QWidget):
         header_view = self.tree.header()
         header_view.setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
         self.tree.setColumnWidth(0, 360)
-        for column in range(1, len(COLUMNS)):
+        for column in range(1, COLUMN_COUNT):
             self.tree.setColumnWidth(column, 110)
         splitter.addWidget(self.tree)
 
         detail = QWidget()
         detail_layout = QVBoxLayout(detail)
         detail_layout.setContentsMargins(0, 6, 0, 0)
-        detail_layout.addWidget(QLabel("選取項目詳細資料 / 備註（備註會自動儲存）"))
+        self.detail_caption = QLabel(
+            tr("Details and notes for the selected item (notes are saved automatically)")
+        )
+        detail_layout.addWidget(self.detail_caption)
         self.detail_box = QPlainTextEdit()
         self.detail_box.setReadOnly(True)
         self.detail_box.setMaximumHeight(150)
         detail_layout.addWidget(self.detail_box)
         self.notes_edit = QPlainTextEdit()
-        self.notes_edit.setPlaceholderText("為這個模型或 run 寫下用途說明…")
+        self.notes_edit.setPlaceholderText(
+            tr("Describe what this model or run is for…")
+        )
         self.notes_edit.setMaximumHeight(80)
         self.notes_edit.textChanged.connect(self._on_notes_changed)
         detail_layout.addWidget(self.notes_edit)
         splitter.addWidget(detail)
         splitter.setSizes([560, 220])
         layout.addWidget(splitter, 1)
+
+    def retranslate(self) -> None:
+        """Re-apply every static string after a language change."""
+
+        self.title_label.setText(tr("Model library"))
+        self.rescan_button.setText(tr("🔄 Rescan"))
+        self.import_button.setText(tr("➕ Import model files"))
+        self.hint_label.setText(
+            tr(
+                "Name your runs and models here, and tick the ones you want to see on "
+                "the inference tabs. Third-party and legacy models are listed too; "
+                "anything that cannot run says why in the Status column."
+            )
+        )
+        self.filter_edit.setPlaceholderText(tr("Filter by run, model name, target or status…"))
+        self.only_usable_check.setText(tr("Show runnable models only"))
+        self.enable_all_button.setText(tr("Tick all"))
+        self.disable_all_button.setText(tr("Untick all"))
+        self.detail_caption.setText(
+            tr("Details and notes for the selected item (notes are saved automatically)")
+        )
+        self.notes_edit.setPlaceholderText(tr("Describe what this model or run is for…"))
+        self.tree.setHeaderLabels(column_labels())
+        # Every row's Kind and Status cell comes from a probe, so a rescan is
+        # what re-renders the table itself in the new language.
+        self.refresh()
 
     # ------------------------------------------------------------- scanning
     def refresh(self) -> None:
@@ -196,7 +241,7 @@ class LibraryPage(QWidget):
         self.tree.clear()
         self._updating = False
         self.rescan_button.setEnabled(False)
-        self.status_label.setText("掃描中…")
+        self.status_label.setText(tr("Scanning…"))
         self.worker = ScanWorker(self.index)
         self.worker.entry_found.connect(self._add_entry)
         self.worker.progress.connect(self._on_progress)
@@ -204,7 +249,9 @@ class LibraryPage(QWidget):
         self.worker.start()
 
     def _on_progress(self, current: int, total: int, name: str) -> None:
-        self.status_label.setText(f"掃描中 {current}/{total}：{name}")
+        self.status_label.setText(
+            tr("Scanning {current}/{total}: {name}", current=current, total=total, name=name)
+        )
 
     def _on_scan_finished(self, total: int) -> None:
         self.rescan_button.setEnabled(True)
@@ -213,7 +260,12 @@ class LibraryPage(QWidget):
         usable = sum(1 for entry in self.entries.values() if entry.compatible)
         enabled = sum(1 for entry in self.entries.values() if entry.usable)
         self.status_label.setText(
-            f"共 {total} 個模型檔；可執行 {usable} 個；已勾選供推論使用 {enabled} 個"
+            tr(
+                "{total} model file(s); {usable} runnable; {enabled} ticked for inference",
+                total=total,
+                usable=usable,
+                enabled=enabled,
+            )
         )
         self._apply_filter()
         self.library_changed.emit()
@@ -297,8 +349,13 @@ class LibraryPage(QWidget):
                 self._updating = False
                 QMessageBox.warning(
                     self,
-                    "無法勾選",
-                    f"「{entry.display_name}」目前不可執行，因此不能加入推論頁面。\n\n{entry.reason}",
+                    tr("Cannot be ticked"),
+                    tr(
+                        "“{name}” cannot run, so it cannot be added to the "
+                        "inference tabs.\n\n{reason}",
+                        name=entry.display_name,
+                        reason=entry.reason,
+                    ),
                 )
                 return
             self.index.set_enabled(entry.entry_id, enabled)
@@ -341,7 +398,7 @@ class LibraryPage(QWidget):
             return
         run_folder = current.data(0, _RUN_ROLE)
         if run_folder is not None:
-            self.detail_box.setPlainText(f"Run 資料夾：{run_folder}")
+            self.detail_box.setPlainText(tr("Run folder: {path}", path=str(run_folder)))
             self.notes_edit.setPlainText(self.index.run_notes(str(run_folder)))
             self.notes_edit.blockSignals(False)
             return
@@ -350,31 +407,46 @@ class LibraryPage(QWidget):
             self.notes_edit.blockSignals(False)
             return
         lines = [
-            f"檔案：{entry.path}",
-            f"類型：{entry.kind_label}",
-            f"架構／模型：{entry.architecture or entry.model_name or '—'}",
-            f"Run：{entry.run_label}",
+            tr("File: {path}", path=str(entry.path)),
+            tr("Kind: {kind}", kind=entry.kind_label),
+            tr(
+                "Architecture / model: {name}",
+                name=entry.architecture or entry.model_name or "—",
+            ),
+            tr("Run: {name}", name=entry.run_label),
         ]
         if entry.experiment:
-            lines.append(f"Experiment：{entry.experiment}")
+            lines.append(tr("Experiment: {name}", name=entry.experiment))
         if entry.target_task:
-            lines.append(f"Target Task：{entry.target_task}")
+            lines.append(tr("Target Task: {name}", name=entry.target_task))
         if entry.rank is not None:
-            lines.append(f"該 Target Task 內排名：第 {entry.rank} 名")
+            lines.append(tr("Rank inside this Target Task: {rank}", rank=entry.rank))
         if entry.evidence_stage:
-            lines.append(f"證據階段：{entry.evidence_stage}")
+            lines.append(tr("Evidence stage: {stage}", stage=entry.evidence_stage))
         if entry.trained_at:
-            lines.append(f"儲存時間：{entry.trained_at}")
+            lines.append(tr("Saved at: {timestamp}", timestamp=entry.trained_at))
         if entry.metrics:
-            metric_text = "、".join(
+            metric_text = ", ".join(
                 f"{key}={value:.6g}" for key, value in sorted(entry.metrics.items())
             )
-            lines.append(f"指標：{metric_text}")
+            lines.append(tr("Metrics: {metrics}", metrics=metric_text))
         if entry.feature_names:
-            lines.append(f"輸入（{len(entry.feature_names)}）：{'、'.join(entry.feature_names)}")
+            lines.append(
+                tr(
+                    "Inputs ({count}): {names}",
+                    count=len(entry.feature_names),
+                    names=", ".join(entry.feature_names),
+                )
+            )
         if entry.target_names:
-            lines.append(f"輸出（{len(entry.target_names)}）：{'、'.join(entry.target_names)}")
-        lines.append(f"狀態：{entry.reason}")
+            lines.append(
+                tr(
+                    "Outputs ({count}): {names}",
+                    count=len(entry.target_names),
+                    names=", ".join(entry.target_names),
+                )
+            )
+        lines.append(tr("Status: {status}", status=entry.reason))
         self.detail_box.setPlainText("\n".join(lines))
         self.notes_edit.setPlainText(entry.notes)
         self.notes_edit.blockSignals(False)
@@ -431,11 +503,11 @@ class LibraryPage(QWidget):
         if item is None:
             return
         menu = QMenu(self)
-        open_action = menu.addAction("在檔案總管開啟位置")
+        open_action = menu.addAction(tr("Open the containing folder"))
         remove_action = None
         entry_id = item.data(0, _ENTRY_ROLE)
         if entry_id is not None:
-            remove_action = menu.addAction("從模型庫移除（刪除檔案）")
+            remove_action = menu.addAction(tr("Remove from the library (deletes the file)"))
         chosen = menu.exec(self.tree.viewport().mapToGlobal(position))
         if chosen is None:
             return
@@ -464,8 +536,12 @@ class LibraryPage(QWidget):
             return
         answer = QMessageBox.question(
             self,
-            "刪除模型檔",
-            f"要永久刪除這個檔案嗎？\n\n{entry.path}\n\n（同名的 .meta.json / .md 說明檔也會一併刪除）",
+            tr("Delete model file"),
+            tr(
+                "Permanently delete this file?\n\n{path}\n\nAny matching .meta.json "
+                "and .md sidecar is deleted with it.",
+                path=str(entry.path),
+            ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -480,7 +556,7 @@ class LibraryPage(QWidget):
             try:
                 candidate.unlink(missing_ok=True)
             except OSError as exc:
-                QMessageBox.warning(self, "刪除失敗", f"{candidate}\n{exc}")
+                QMessageBox.warning(self, tr("Delete failed"), f"{candidate}\n{exc}")
                 return
         self.index.forget(entry_id)
         self.index.save()
@@ -489,7 +565,10 @@ class LibraryPage(QWidget):
     def import_models(self) -> None:
         patterns = " ".join(f"*{suffix}" for suffix in MODEL_SUFFIXES)
         paths, _filter = QFileDialog.getOpenFileNames(
-            self, "選擇要匯入模型庫的檔案", str(MODEL_LIBRARY_ROOT), f"模型檔 ({patterns})"
+            self,
+            tr("Choose model files to import"),
+            str(MODEL_LIBRARY_ROOT),
+            tr("Model files ({patterns})", patterns=patterns),
         )
         if not paths:
             return
@@ -502,8 +581,8 @@ class LibraryPage(QWidget):
             if target.exists():
                 answer = QMessageBox.question(
                     self,
-                    "檔案已存在",
-                    f"{target.name} 已經在模型庫中，要覆蓋嗎？",
+                    tr("File already exists"),
+                    tr("{name} is already in the library. Overwrite it?", name=target.name),
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No,
                 )
@@ -517,7 +596,7 @@ class LibraryPage(QWidget):
                         shutil.copy2(sidecar, destination / sidecar.name)
                 copied += 1
             except OSError as exc:
-                QMessageBox.warning(self, "匯入失敗", f"{source}\n{exc}")
+                QMessageBox.warning(self, tr("Import failed"), f"{source}\n{exc}")
         if copied:
             self.refresh()
 

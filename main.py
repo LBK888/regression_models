@@ -19,6 +19,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import i18n
+from i18n import LANGUAGES
+
 
 def _self_test() -> int:
     """Confirm the model registry and the metric core still line up."""
@@ -131,11 +134,22 @@ def _scan() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Regression Models — 訓練與推論整合介面")
-    parser.add_argument("--self-test", action="store_true", help="驗證核心，不開啟 GUI")
-    parser.add_argument("--validate", metavar="DATASET", help="用共用載入器稽核一個資料檔")
-    parser.add_argument("--scan", action="store_true", help="列出模型庫目前看到的模型")
+    parser = argparse.ArgumentParser(
+        description="Regression Models — training, model library and inference"
+    )
+    parser.add_argument("--self-test", action="store_true", help="check the engine without a GUI")
+    parser.add_argument("--validate", metavar="DATASET", help="audit a dataset with the shared loader")
+    parser.add_argument("--scan", action="store_true", help="list what the model library sees")
+    parser.add_argument(
+        "--lang",
+        choices=[code for code, _name in LANGUAGES],
+        help="override the interface language for this launch",
+    )
     args = parser.parse_args(argv)
+
+    i18n.initialize()
+    if args.lang:
+        i18n.set_language(args.lang, persist=False)
 
     if args.self_test:
         return _self_test()

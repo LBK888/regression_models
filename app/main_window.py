@@ -12,9 +12,21 @@ from __future__ import annotations
 import sys
 from typing import Sequence
 
-from PyQt6.QtGui import QCloseEvent
-from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow, QStatusBar, QTabWidget
+import torch
 
+from PyQt6.QtGui import QCloseEvent
+from PyQt6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QStatusBar,
+    QTabWidget,
+)
+
+import i18n
+from i18n import tr
 from project_paths import ensure_folders
 from regression_core import DEVICE, EXECUTION_MODE_LABEL
 from regression_v4.ui import TrainingPage
@@ -25,15 +37,10 @@ from .library_page import LibraryPage
 from .theme import C, apply_theme
 
 
-APP_TITLE = "Regression Models — 訓練、模型庫與推論"
-
-
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         ensure_folders()
-        self.setWindowTitle(f"{APP_TITLE}　[{EXECUTION_MODE_LABEL}]")
-        self.resize(1560, 960)
 
         self.training_page = TrainingPage()
         self.library_page = LibraryPage()
@@ -41,36 +48,105 @@ class MainWindow(QMainWindow):
         self.batch_page = BatchPage()
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.training_page, "① 訓練與超參數試探")
-        self.tabs.addTab(self.library_page, "② 模型庫")
-        self.tabs.addTab(self.inference_page, "③ 單筆推論")
-        self.tabs.addTab(self.batch_page, "④ 批次推論與驗證")
+        self.tabs.addTab(self.training_page, "")
+        self.tabs.addTab(self.library_page, "")
+        self.tabs.addTab(self.inference_page, "")
+        self.tabs.addTab(self.batch_page, "")
         self.setCentralWidget(self.tabs)
 
         status = QStatusBar()
-        device_label = QLabel(
-            f"運算裝置：{DEVICE.type.upper()}"
-            + (f"（{__import__('torch').cuda.get_device_name(0)}）" if DEVICE.type == "cuda" else "")
-        )
-        device_label.setStyleSheet(f"color: {C['muted']}; padding: 0 8px;")
-        status.addPermanentWidget(device_label)
+        self.language_caption = QLabel()
+        self.language_caption.setStyleSheet(f"color: {C['muted']}; padding: 0 4px;")
+        self.language_combo = QComboBox()
+        self.language_combo.setMinimumWidth(130)
+        for code, name in i18n.available_languages():
+            self.language_combo.addItem(name, code)
+        index = self.language_combo.findData(i18n.current_language())
+        self.language_combo.setCurrentIndex(max(0, index))
+        self.language_combo.currentIndexChanged.connect(self._on_language_selected)
+        self.device_label = QLabel()
+        self.device_label.setStyleSheet(f"color: {C['muted']}; padding: 0 8px;")
+        status.addPermanentWidget(self.language_caption)
+        status.addPermanentWidget(self.language_combo)
+        status.addPermanentWidget(self.device_label)
         self.setStatusBar(status)
+
+        self.resize(1560, 960)
+        self.retranslate()
 
         self.training_page.run_completed.connect(self._on_run_completed)
         self.library_page.library_changed.connect(self._publish_models)
         self._publish_models()
 
+    # ----------------------------------------------------------------- i18n
+    def retranslate(self) -> None:
+        """Re-apply the window's own strings. Pages retranslate themselves."""
+
+        self.setWindowTitle(
+            tr("Regression Models — training, model library and inference")
+            + f"　[{tr(EXECUTION_MODE_LABEL)}]"
+        )
+        self.tabs.setTabText(0, tr("① Training and hyperparameter search"))
+        self.tabs.setTabText(1, tr("② Model library"))
+        self.tabs.setTabText(2, tr("③ Single-sample inference"))
+        self.tabs.setTabText(3, tr("④ Batch inference and validation"))
+        self.language_caption.setText(tr("Language"))
+        device = tr("Compute device: {device}", device=DEVICE.type.upper())
+        if DEVICE.type == "cuda":
+            device += f" ({torch.cuda.get_device_name(0)})"
+        self.device_label.setText(device)
+
+    def _on_language_selected(self, index: int) -> None:
+        language = self.language_combo.itemData(index)
+        if not language or language == i18n.current_language():
+            return
+        if self.training_page.has_running_worker() or (
+            self.batch_page.worker is not None and self.batch_page.worker.isRunning()
+        ):
+            QMessageBox.warning(
+                self,
+                tr("A run is in progress"),
+                tr("Wait for the current run to finish before switching language."),
+            )
+            self.language_combo.blockSignals(True)
+            self.language_combo.setCurrentIndex(
+                self.language_combo.findData(i18n.current_language())
+            )
+            self.language_combo.blockSignals(False)
+            return
+
+        previous = self.tabs.currentIndex()
+        i18n.set_language(language)
+        self.retranslate()
+        # The training tab is rebuilt rather than relabelled: its settings tab
+        # builds dozens of labels and tooltips inline. A loaded dataset is
+        # reloaded from its path as part of that rebuild.
+        self.training_page.retranslate()
+        self.library_page.retranslate()
+        self.inference_page.retranslate()
+        self.batch_page.retranslate()
+        self.tabs.setCurrentIndex(previous)
+        self.statusBar().showMessage(
+            tr("Interface language: {name}", name=i18n.language_name(language)), 5000
+        )
+
+    # ------------------------------------------------------------- plumbing
     def _on_run_completed(self, run_folder: str) -> None:
         """A finished Benchmark Run just wrote new bundles; pick them up."""
 
-        self.statusBar().showMessage(f"訓練完成：{run_folder}　正在更新模型庫…", 8000)
+        self.statusBar().showMessage(
+            tr("Training finished: {path} — refreshing the model library…", path=run_folder),
+            8000,
+        )
         self.library_page.refresh()
 
     def _publish_models(self) -> None:
         entries = self.library_page.usable_entries()
         self.inference_page.set_entries(entries)
         self.batch_page.set_entries(entries)
-        self.statusBar().showMessage(f"可用於推論的模型：{len(entries)} 個", 5000)
+        self.statusBar().showMessage(
+            tr("Models available for inference: {count}", count=len(entries)), 5000
+        )
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if not self.training_page.can_close():
@@ -83,6 +159,7 @@ class MainWindow(QMainWindow):
 
 
 def launch(argv: Sequence[str] | None = None) -> int:
+    i18n.initialize()
     app = QApplication(list(argv if argv is not None else sys.argv))
     apply_theme(app)
     window = MainWindow()

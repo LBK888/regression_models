@@ -38,6 +38,7 @@ from PyQt6.QtWidgets import (
 import numpy as np
 import pandas as pd
 
+from i18n import tr
 from project_paths import REPORTS_ROOT, ensure_folders
 
 from .adapters import load_predictor
@@ -47,7 +48,14 @@ from .model_library import ModelEntry
 from .theme import C
 
 
-_NO_COLUMN = "（不對應）"
+def no_column_label() -> str:
+    """The "leave this name unmapped" entry, resolved per build for i18n."""
+
+    return tr("(not mapped)")
+
+
+_ROLE_INPUT = "input"
+_ROLE_TARGET = "target"
 
 
 class BatchWorker(QThread):
@@ -97,10 +105,17 @@ class BatchWorker(QThread):
                             row_labels=(),
                             predictions=np.empty((0, 0)),
                             total_rows=len(self.frame),
-                            error=f"載入失敗：{type(exc).__name__}: {exc}",
+                            error=tr(
+                                "Loading failed: {error_type}: {error}",
+                                error_type=type(exc).__name__,
+                                error=str(exc),
+                            ),
                         )
                     )
-                    self.log.emit(f"[{entry.display_name}] 載入失敗：{exc}")
+                    self.log.emit(
+                        f"[{entry.display_name}] "
+                        + tr("loading failed: {error}", error=str(exc))
+                    )
                     continue
                 result = run_batch(
                     predictor,
@@ -116,12 +131,19 @@ class BatchWorker(QThread):
                 elif result.has_validation:
                     metrics = result.metrics
                     self.log.emit(
-                        f"[{entry.display_name}] {result.used_rows} 列：R²={metrics.reported_r2:.4f}, "
-                        f"MAE={metrics.mae:.6g}, MAPE={metrics.mape_percent:.2f}%, "
-                        f"NMAE={metrics.nmae:.6g}"
+                        f"[{entry.display_name}] "
+                        + tr("{rows} row(s)", rows=result.used_rows)
+                        + f": R²={metrics.reported_r2:.4f}, MAE={metrics.mae:.6g}, "
+                        f"MAPE={metrics.mape_percent:.2f}%, NMAE={metrics.nmae:.6g}"
                     )
                 else:
-                    self.log.emit(f"[{entry.display_name}] {result.used_rows} 列預測完成（無 ground truth）")
+                    self.log.emit(
+                        f"[{entry.display_name}] "
+                        + tr(
+                            "predicted {rows} row(s); no ground truth to validate against",
+                            rows=result.used_rows,
+                        )
+                    )
 
             artifacts = write_report(
                 results,
@@ -161,58 +183,62 @@ class BatchPage(QWidget):
         layout.setContentsMargins(14, 12, 14, 12)
         layout.setSpacing(10)
 
-        source = QGroupBox("1. 資料來源")
-        source_layout = QVBoxLayout(source)
+        self.source_box = QGroupBox(tr("1. Data source"))
+        source_layout = QVBoxLayout(self.source_box)
         row = QHBoxLayout()
-        browse = QPushButton("選擇 CSV / Excel")
-        browse.clicked.connect(self.browse_table)
-        self.path_label = QLabel("尚未載入資料表")
+        self.browse_button = QPushButton(tr("Choose a CSV / Excel file"))
+        self.browse_button.clicked.connect(self.browse_table)
+        self.path_label = QLabel(tr("No table loaded yet"))
         self.path_label.setStyleSheet(f"color: {C['muted']};")
         self.sheet_combo = QComboBox()
         self.sheet_combo.setMinimumWidth(180)
         self.sheet_combo.currentIndexChanged.connect(self._on_sheet_changed)
         self.observation_combo = QComboBox()
         self.observation_combo.setMinimumWidth(180)
-        row.addWidget(browse)
+        self.sheet_caption = QLabel(tr("Worksheet:"))
+        self.observation_caption = QLabel(tr("Observation ID column:"))
+        row.addWidget(self.browse_button)
         row.addWidget(self.path_label, 1)
-        row.addWidget(QLabel("工作表："))
+        row.addWidget(self.sheet_caption)
         row.addWidget(self.sheet_combo)
-        row.addWidget(QLabel("觀測 ID 欄："))
+        row.addWidget(self.observation_caption)
         row.addWidget(self.observation_combo)
         source_layout.addLayout(row)
-        self.table_summary = QLabel("載入後會顯示列數與欄位數。")
+        self.table_summary = QLabel(tr("Row and column counts appear once a table is loaded."))
         self.table_summary.setStyleSheet(f"color: {C['muted']}; font-size: 12px;")
         source_layout.addWidget(self.table_summary)
-        layout.addWidget(source)
+        layout.addWidget(self.source_box)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
-        models_box = QGroupBox("2. 選擇模型（可多選比較）")
-        models_layout = QVBoxLayout(models_box)
+        self.models_box = QGroupBox(tr("2. Models (tick several to compare them)"))
+        models_layout = QVBoxLayout(self.models_box)
         self.model_list = QListWidget()
         self.model_list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.model_list.itemChanged.connect(self._on_model_selection_changed)
         models_layout.addWidget(self.model_list, 1)
         select_row = QHBoxLayout()
-        select_all = QPushButton("全選")
-        select_all.setObjectName("secondaryBtn")
-        select_all.clicked.connect(lambda: self._set_all_models(True))
-        select_none = QPushButton("全不選")
-        select_none.setObjectName("secondaryBtn")
-        select_none.clicked.connect(lambda: self._set_all_models(False))
-        select_row.addWidget(select_all)
-        select_row.addWidget(select_none)
+        self.select_all_button = QPushButton(tr("Select all"))
+        self.select_all_button.setObjectName("secondaryBtn")
+        self.select_all_button.clicked.connect(lambda: self._set_all_models(True))
+        self.select_none_button = QPushButton(tr("Select none"))
+        self.select_none_button.setObjectName("secondaryBtn")
+        self.select_none_button.clicked.connect(lambda: self._set_all_models(False))
+        select_row.addWidget(self.select_all_button)
+        select_row.addWidget(self.select_none_button)
         select_row.addStretch(1)
         models_layout.addLayout(select_row)
-        splitter.addWidget(models_box)
+        splitter.addWidget(self.models_box)
 
-        mapping_box = QGroupBox("3. 欄位對應（自動比對，可手動修正）")
-        mapping_layout = QVBoxLayout(mapping_box)
+        self.mapping_box = QGroupBox(tr("3. Column mapping (matched automatically, editable)"))
+        mapping_layout = QVBoxLayout(self.mapping_box)
         self.mapping_model_combo = QComboBox()
         self.mapping_model_combo.currentIndexChanged.connect(self._show_mapping)
         mapping_layout.addWidget(self.mapping_model_combo)
         self.mapping_table = QTableWidget(0, 3)
-        self.mapping_table.setHorizontalHeaderLabels(("用途", "模型欄位名稱", "資料表欄位"))
+        self.mapping_table.setHorizontalHeaderLabels(
+            (tr("Role"), tr("Model column name"), tr("Table column"))
+        )
         self.mapping_table.horizontalHeader().setSectionResizeMode(
             1, QHeaderView.ResizeMode.Stretch
         )
@@ -223,25 +249,28 @@ class BatchPage(QWidget):
         self.mapping_table.verticalHeader().setVisible(False)
         mapping_layout.addWidget(self.mapping_table, 1)
         self.mapping_hint = QLabel(
-            "把模型的輸出欄位也對應到資料表，就會把這份資料當作 test data 驗證並輸出比對報告。"
+            tr(
+                "Map the model's output columns as well and this table is treated as "
+                "test data: the run then produces a validation comparison report."
+            )
         )
         self.mapping_hint.setWordWrap(True)
         self.mapping_hint.setStyleSheet(f"color: {C['muted']}; font-size: 12px;")
         mapping_layout.addWidget(self.mapping_hint)
-        splitter.addWidget(mapping_box)
+        splitter.addWidget(self.mapping_box)
         splitter.setSizes([420, 700])
         layout.addWidget(splitter, 1)
 
-        run_box = QGroupBox("4. 執行與結果")
-        run_layout = QVBoxLayout(run_box)
+        self.run_box = QGroupBox(tr("4. Run and results"))
+        run_layout = QVBoxLayout(self.run_box)
         buttons = QHBoxLayout()
-        self.run_button = QPushButton("▶ 執行批次推論")
+        self.run_button = QPushButton(tr("▶ Run batch inference"))
         self.run_button.clicked.connect(self.start_batch)
-        self.cancel_button = QPushButton("取消")
+        self.cancel_button = QPushButton(tr("Cancel"))
         self.cancel_button.setObjectName("secondaryBtn")
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self.cancel_batch)
-        self.open_report_button = QPushButton("開啟報告資料夾")
+        self.open_report_button = QPushButton(tr("Open the report folder"))
         self.open_report_button.setObjectName("secondaryBtn")
         self.open_report_button.setEnabled(False)
         self.open_report_button.clicked.connect(self.open_report)
@@ -256,20 +285,53 @@ class BatchPage(QWidget):
         self.result_tabs = QTabWidget()
         self.metrics_table = QTableWidget(0, 0)
         self.metrics_table.verticalHeader().setVisible(False)
-        self.result_tabs.addTab(self.metrics_table, "驗證指標")
+        self.result_tabs.addTab(self.metrics_table, tr("Validation metrics"))
         self.preview_table = QTableWidget(0, 0)
         self.preview_table.verticalHeader().setVisible(False)
-        self.result_tabs.addTab(self.preview_table, "預測結果預覽")
+        self.result_tabs.addTab(self.preview_table, tr("Prediction preview"))
         self.log_box = QPlainTextEdit()
         self.log_box.setReadOnly(True)
-        self.result_tabs.addTab(self.log_box, "執行紀錄")
+        self.result_tabs.addTab(self.log_box, tr("Run log"))
         run_layout.addWidget(self.result_tabs, 1)
-        layout.addWidget(run_box, 1)
+        layout.addWidget(self.run_box, 1)
+
+    def retranslate(self) -> None:
+        """Re-apply every static string after a language change."""
+
+        self.source_box.setTitle(tr("1. Data source"))
+        self.browse_button.setText(tr("Choose a CSV / Excel file"))
+        self.sheet_caption.setText(tr("Worksheet:"))
+        self.observation_caption.setText(tr("Observation ID column:"))
+        self.models_box.setTitle(tr("2. Models (tick several to compare them)"))
+        self.select_all_button.setText(tr("Select all"))
+        self.select_none_button.setText(tr("Select none"))
+        self.mapping_box.setTitle(tr("3. Column mapping (matched automatically, editable)"))
+        self.mapping_table.setHorizontalHeaderLabels(
+            (tr("Role"), tr("Model column name"), tr("Table column"))
+        )
+        self.run_box.setTitle(tr("4. Run and results"))
+        self.run_button.setText(tr("▶ Run batch inference"))
+        self.cancel_button.setText(tr("Cancel"))
+        self.open_report_button.setText(tr("Open the report folder"))
+        self.result_tabs.setTabText(0, tr("Validation metrics"))
+        self.result_tabs.setTabText(1, tr("Prediction preview"))
+        self.result_tabs.setTabText(2, tr("Run log"))
+        if self.frame is None:
+            self.path_label.setText(tr("No table loaded yet"))
+            self.table_summary.setText(
+                tr("Row and column counts appear once a table is loaded.")
+            )
+        else:
+            self._on_sheet_changed(self.sheet_combo.currentIndex())
+        self.set_entries(self.entries)
 
     # -------------------------------------------------------------- loading
     def browse_table(self) -> None:
         path, _filter = QFileDialog.getOpenFileName(
-            self, "選擇批次推論資料表", str(Path.home()), "Data (*.xlsx *.xls *.csv)"
+            self,
+            tr("Choose the table to run inference on"),
+            str(Path.home()),
+            tr("Data ({patterns})", patterns="*.xlsx *.xls *.csv"),
         )
         if path:
             self.load_table(path)
@@ -278,7 +340,9 @@ class BatchPage(QWidget):
         try:
             self.bundle = load_table(path)
         except Exception as exc:
-            QMessageBox.critical(self, "資料載入失敗", f"{type(exc).__name__}: {exc}")
+            QMessageBox.critical(
+                self, tr("Could not load the table"), f"{type(exc).__name__}: {exc}"
+            )
             return
         self.path_label.setText(path)
         self.sheet_combo.blockSignals(True)
@@ -295,11 +359,16 @@ class BatchPage(QWidget):
         self.frame = self.bundle.sheets[sheet].data
         columns = [str(column) for column in self.frame.columns]
         self.table_summary.setText(
-            f"工作表「{sheet}」：{len(self.frame):,} 列 × {len(columns)} 欄"
+            tr(
+                "Worksheet “{sheet}”: {rows:,} rows × {columns} columns",
+                sheet=sheet,
+                rows=len(self.frame),
+                columns=len(columns),
+            )
         )
         self.observation_combo.blockSignals(True)
         self.observation_combo.clear()
-        self.observation_combo.addItem(_NO_COLUMN)
+        self.observation_combo.addItem(no_column_label())
         for column in columns:
             self.observation_combo.addItem(column)
         self.observation_combo.blockSignals(False)
@@ -323,14 +392,19 @@ class BatchPage(QWidget):
                 Qt.CheckState.Checked if entry.entry_id in checked else Qt.CheckState.Unchecked
             )
             item.setToolTip(
-                f"{entry.path}\n輸入：{'、'.join(entry.feature_names) or '—'}\n"
-                f"輸出：{'、'.join(entry.target_names) or '—'}"
+                f"{entry.path}\n"
+                + tr("Inputs: {names}", names=", ".join(entry.feature_names) or "—")
+                + "\n"
+                + tr("Outputs: {names}", names=", ".join(entry.target_names) or "—")
             )
             self.model_list.addItem(item)
         self.model_list.blockSignals(False)
         if not self.entries:
             self.mapping_hint.setText(
-                "目前沒有已勾選且可執行的模型。請先到「模型庫」分頁勾選要使用的模型。"
+                tr(
+                    "No model is both ticked and runnable. Tick the ones you want on the "
+                    "Model library tab first."
+                )
             )
         self._rebuild_mappings()
 
@@ -408,11 +482,16 @@ class BatchPage(QWidget):
         columns = [str(column) for column in self.frame.columns]
         mapping = self.mappings.setdefault(entry_id, {"features": {}, "targets": {}})
 
-        rows = [("輸入", name, mapping["features"].get(name)) for name in entry.feature_names]
-        rows += [("輸出", name, mapping["targets"].get(name)) for name in entry.target_names]
+        rows = [
+            (_ROLE_INPUT, name, mapping["features"].get(name)) for name in entry.feature_names
+        ]
+        rows += [
+            (_ROLE_TARGET, name, mapping["targets"].get(name)) for name in entry.target_names
+        ]
+        role_labels = {_ROLE_INPUT: tr("Input"), _ROLE_TARGET: tr("Output")}
         self.mapping_table.setRowCount(len(rows))
         for row_index, (role, name, selected) in enumerate(rows):
-            role_item = QTableWidgetItem(role)
+            role_item = QTableWidgetItem(role_labels[role])
             role_item.setFlags(Qt.ItemFlag.ItemIsEnabled)
             self.mapping_table.setItem(row_index, 0, role_item)
             name_item = QTableWidgetItem(name)
@@ -421,7 +500,7 @@ class BatchPage(QWidget):
             self.mapping_table.setItem(row_index, 1, name_item)
 
             combo = QComboBox()
-            combo.addItem(_NO_COLUMN)
+            combo.addItem(no_column_label())
             for column in columns:
                 combo.addItem(column)
             combo.setCurrentIndex(columns.index(selected) + 1 if selected in columns else 0)
@@ -434,23 +513,33 @@ class BatchPage(QWidget):
         unmapped_features = [name for name in entry.feature_names if not mapping["features"].get(name)]
         if unmapped_features:
             self.mapping_hint.setText(
-                f"⚠️ 還有 {len(unmapped_features)} 個輸入欄位未對應："
-                f"{'、'.join(unmapped_features[:5])}{'…' if len(unmapped_features) > 5 else ''}"
+                tr(
+                    "⚠️ {count} input column(s) are still unmapped: {names}",
+                    count=len(unmapped_features),
+                    names=", ".join(unmapped_features[:5])
+                    + ("…" if len(unmapped_features) > 5 else ""),
+                )
             )
         elif mapped_targets == len(entry.target_names) and entry.target_names:
             self.mapping_hint.setText(
-                "✅ 輸入與全部 ground truth 欄位都已對應：這次會輸出驗證比對報告。"
+                tr(
+                    "✅ Inputs and every ground-truth column are mapped: this run "
+                    "will produce a validation comparison report."
+                )
             )
         else:
             self.mapping_hint.setText(
-                "輸入已對應完成。把輸出欄位也對應到資料表，就會把這份資料當作 test data 驗證。"
+                tr(
+                    "Inputs are fully mapped. Map the output columns too and this table "
+                    "is treated as test data."
+                )
             )
 
     def _set_mapping(self, entry_id: str, role: str, name: str, combo: QComboBox) -> None:
-        key = "features" if role == "輸入" else "targets"
+        key = "features" if role == _ROLE_INPUT else "targets"
         value = combo.currentText()
         bucket = self.mappings.setdefault(entry_id, {"features": {}, "targets": {}})[key]
-        if value == _NO_COLUMN:
+        if value == no_column_label():
             bucket.pop(name, None)
         else:
             bucket[name] = value
@@ -459,11 +548,17 @@ class BatchPage(QWidget):
     # ------------------------------------------------------------ execution
     def start_batch(self) -> None:
         if self.frame is None:
-            QMessageBox.warning(self, "尚未載入資料", "請先選擇要批次推論的 CSV 或 Excel 檔。")
+            QMessageBox.warning(
+                self,
+                tr("No table loaded"),
+                tr("Choose the CSV or Excel file to run inference on first."),
+            )
             return
         chosen = self.selected_entries()
         if not chosen:
-            QMessageBox.warning(self, "尚未選擇模型", "請至少勾選一個模型。")
+            QMessageBox.warning(
+                self, tr("No model selected"), tr("Tick at least one model.")
+            )
             return
         incomplete = [
             entry.display_name
@@ -474,10 +569,12 @@ class BatchPage(QWidget):
         if incomplete:
             answer = QMessageBox.question(
                 self,
-                "欄位對應不完整",
-                "這些模型還有未對應的輸入欄位，執行後會被標記為失敗：\n\n"
-                + "\n".join(incomplete[:8])
-                + "\n\n仍要繼續嗎？",
+                tr("Incomplete column mapping"),
+                tr(
+                    "These models still have unmapped input columns and will be reported "
+                    "as failed:\n\n{names}\n\nRun anyway?",
+                    names="\n".join(incomplete[:8]),
+                ),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -485,7 +582,7 @@ class BatchPage(QWidget):
                 return
 
         observation = self.observation_combo.currentText()
-        observation_column = None if observation == _NO_COLUMN else observation
+        observation_column = None if observation == no_column_label() else observation
         folder = REPORTS_ROOT / f"batch_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
 
         self.log_box.clear()
@@ -510,7 +607,9 @@ class BatchPage(QWidget):
     def cancel_batch(self) -> None:
         if self.worker and self.worker.isRunning():
             self.worker.requestInterruption()
-            self.log_box.appendPlainText("已送出取消請求；目前模型完成後停止。")
+            self.log_box.appendPlainText(
+                tr("Cancellation requested; the run stops after the current model.")
+            )
 
     def _on_progress(self, current: int, total: int, label: str) -> None:
         self.progress.setValue(round(100 * current / max(1, total)))
@@ -524,32 +623,48 @@ class BatchPage(QWidget):
         self.open_report_button.setEnabled(True)
         self._fill_metrics(results)
         self._fill_preview(results)
-        self.log_box.appendPlainText(f"報告已輸出：{artifacts.folder}")
+        self.log_box.appendPlainText(
+            tr("Report written to: {path}", path=str(artifacts.folder))
+        )
         if artifacts.pdf_error:
-            self.log_box.appendPlainText(f"PDF 產生失敗（其他檔案不受影響）：{artifacts.pdf_error}")
+            self.log_box.appendPlainText(
+                tr(
+                    "The PDF could not be produced (every other file is intact): {error}",
+                    error=artifacts.pdf_error,
+                )
+            )
         validated = sum(1 for result in results if result.has_validation)
         QMessageBox.information(
             self,
-            "批次推論完成",
-            f"{len(results)} 個模型完成，其中 {validated} 個有 ground truth 可驗證。\n\n"
-            f"報告資料夾：\n{artifacts.folder}",
+            tr("Batch inference finished"),
+            tr(
+                "{total} model(s) finished, {validated} of them with ground truth to "
+                "validate against.\n\nReport folder:\n{path}",
+                total=len(results),
+                validated=validated,
+                path=str(artifacts.folder),
+            ),
         )
 
     def _on_failed(self, details: str) -> None:
         self.run_button.setEnabled(True)
         self.cancel_button.setEnabled(False)
         self.log_box.appendPlainText(details)
-        QMessageBox.critical(self, "批次推論失敗", details[-3000:])
+        QMessageBox.critical(self, tr("Batch inference failed"), details[-3000:])
 
     def _fill_metrics(self, results: list[BatchResult]) -> None:
         rows = [row for result in results for row in result.metric_rows()]
         if not rows:
             self.metrics_table.setRowCount(0)
             self.metrics_table.setColumnCount(1)
-            self.metrics_table.setHorizontalHeaderLabels(("訊息",))
+            self.metrics_table.setHorizontalHeaderLabels((tr("Message"),))
             self.metrics_table.setRowCount(1)
             self.metrics_table.setItem(
-                0, 0, QTableWidgetItem("沒有 ground truth 欄位，因此沒有驗證指標。")
+                0,
+                0,
+                QTableWidgetItem(
+                    tr("No ground-truth column was mapped, so there are no validation metrics.")
+                ),
             )
             self.metrics_table.horizontalHeader().setSectionResizeMode(
                 0, QHeaderView.ResizeMode.Stretch
@@ -591,7 +706,7 @@ class BatchPage(QWidget):
         try:
             os.startfile(str(self.last_artifacts.folder))  # type: ignore[attr-defined]
         except Exception as exc:
-            QMessageBox.warning(self, "無法開啟資料夾", str(exc))
+            QMessageBox.warning(self, tr("Could not open the folder"), str(exc))
 
     def stop(self) -> None:
         if self.worker and self.worker.isRunning():

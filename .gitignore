@@ -12,6 +12,9 @@ reports/
 models/library.json
 models/imported/
 
+# Per-machine preferences, such as the chosen interface language.
+settings.json
+
 # Editor / OS
 .vscode/
 .idea/

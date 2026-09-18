@@ -43,6 +43,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from i18n import tr
 from project_paths import DEFAULT_OUTPUT_ROOT
 from regression_core import (
     ColumnRef,
@@ -92,58 +93,170 @@ from .reporting import MasterReportBuilder, ReportArtifacts, build_no_evidence_r
 from .splitting import DatasetIdentity
 
 
-ROLE_OPTIONS = {
-    "skip": "略過",
-    "input": "輸入",
-    "combined_input": "合併輸入",
-    "output": "輸出",
-    "input_or_output": "可作輸入或輸出",
-    "observation_id": "Observation ID（不作為特徵）",
-    "group_id": "Group ID（不作為特徵）",
-}
+def role_options() -> dict[str, str]:
+    """Sheet and column role labels, resolved per build so i18n applies."""
+
+    return {
+        "skip": tr("Skip"),
+        "input": tr("Input"),
+        "combined_input": tr("Combined input"),
+        "output": tr("Output"),
+        "input_or_output": tr("Input or output"),
+        "observation_id": tr("Observation ID (not a feature)"),
+        "group_id": tr("Group ID (not a feature)"),
+    }
 
 HELP_GLYPH = "⍰"
 
 
-MODEL_HELP = {
-    "mean": "平均值基準模型：只用訓練資料的目標平均值預測；勾選後可判斷複雜模型是否真的優於最簡單基準。",
-    "ridge": "Ridge 線性迴歸：以 L2 正則化縮小不穩定係數；勾選後會評估較抗共線性的線性關係。",
-    "pls": "PLS：把高度相關特徵壓縮成少數與目標相關的潛在成分；適合特徵多且共線的小資料。",
-    "svr_rbf": "RBF-SVR：以核函數學習非線性關係並控制誤差帶；勾選後會增加一組非線性小樣本比較。",
-    "random_forest": "Random Forest：對多棵隨機決策樹取平均；可描述非線性與交互作用，但訓練時間較長。",
-    "extra_trees": "Extra Trees：使用更隨機的切分建立樹集成；通常較快並可降低單棵樹的變異。",
-    "deep_mlp": "Deep MLP：多層全連接神經網路；會學習一般非線性關係並使用所選 neural loss。",
-    "wide_mlp": "Wide MLP：較寬的全連接神經網路；增加同層表示能力，也會增加參數與運算量。",
-    "residual_mlp": "Residual MLP：以殘差連接訓練較深網路；可改善梯度傳遞並增加非線性容量。",
-    "multi_branch_mlp": "Multi-branch MLP：以多條並行網路路徑抽取不同表示後合併；會增加模型容量與運算量。",
-    "bottleneck_mlp": "Bottleneck MLP：先壓縮再重建高階表示；可促使模型學到較精簡的特徵組合。",
-    "cnn1d": "CNN1D：沿使用者確認的有序一維特徵滑動卷積核；只適合相鄰欄位確實具有局部關係的資料。",
-    "resnet1d": "ResNet1D：在有序一維特徵上使用殘差卷積區塊；適合序列型資料，不要求光譜命名。",
-    "grouped_fusion": "Grouped Fusion：每個 Feature Group 使用獨立編碼器再融合；只有至少兩個有意義群組時才執行。",
-    "mlp_embeddings": "Numerical-Embedding MLP：先把每個數值特徵轉成可學習表示再交給 MLP；可捕捉一般表格非線性。",
-    "ft_transformer": "FT-Transformer：把每個特徵視為 token 並用 attention 建模特徵互動；適合一般表格資料但較耗時。",
-    "modern_nca": "ModernNCA：學習讓相似目標彼此接近的嵌入空間，再以鄰居預測；適合探索局部樣本結構。",
-    "tabm": "TabM：以參數共享的多成員表格神經網路集成預測；套件可用時才會執行。",
-    "realmlp": "RealMLP：使用 pytabkit 的表格 MLP 設定；套件可用時加入比較。",
-    "catboost": "CatBoost：梯度提升決策樹；擅長一般表格非線性，安裝 optional package 後才可使用。",
-    "xgboost": "XGBoost：正則化梯度提升樹；勾選後加入常用表格 boosting 比較，運算量會增加。",
-    "lightgbm": "LightGBM：以 leaf-wise 策略建立梯度提升樹；通常速度快，安裝 optional package 後才可使用。",
-}
+def model_help() -> dict[str, str]:
+    """One sentence per model family: what ticking it buys, and what it costs."""
 
-LOSS_HELP = {
-    "mse": "MSE：平方較大的誤差，因此會更重視離群的大偏差；勾選後 neural models 會多訓練一組 MSE configuration。",
-    "huber": "Huber／SmoothL1：小誤差用平方、大誤差改用近似線性；可降低離群值對 neural training 的影響。",
-    "mae": "MAE／L1：所有絕對誤差按比例計算；較不受離群值影響，但梯度較不平滑。",
-    "log_cosh": "Log-cosh：小誤差近似 MSE、大誤差近似 MAE；提供平滑且較耐離群值的折衷。",
-}
+    return {
+        "mean": tr(
+            "Mean baseline: predicts the training targets' mean and nothing else. Tick "
+            "it to see whether a complex model really beats the simplest possible "
+            "prediction."
+        ),
+        "ridge": tr(
+            "Ridge linear regression: L2 regularization shrinks unstable coefficients, "
+            "which makes the linear fit more robust to collinear features."
+        ),
+        "pls": tr(
+            "PLS: compresses highly correlated features into a few latent components "
+            "related to the target. Suited to small data with many collinear features."
+        ),
+        "svr_rbf": tr(
+            "RBF-SVR: learns a nonlinear relationship through a kernel while bounding "
+            "the error band. Adds one nonlinear small-sample comparison."
+        ),
+        "random_forest": tr(
+            "Random Forest: averages many randomized decision trees. Captures "
+            "nonlinearity and interactions, but takes longer to train."
+        ),
+        "extra_trees": tr(
+            "Extra Trees: builds a tree ensemble with more random splits. Usually "
+            "faster, and reduces the variance of any single tree."
+        ),
+        "deep_mlp": tr(
+            "Deep MLP: a multi-layer fully connected network. Learns general "
+            "nonlinearity and honours the neural loss you selected."
+        ),
+        "wide_mlp": tr(
+            "Wide MLP: a wider fully connected network. More representational capacity "
+            "per layer, at the cost of more parameters and compute."
+        ),
+        "residual_mlp": tr(
+            "Residual MLP: residual connections let a deeper network train, improving "
+            "gradient flow and adding nonlinear capacity."
+        ),
+        "multi_branch_mlp": tr(
+            "Multi-branch MLP: several parallel paths extract different representations "
+            "before merging. More capacity, and more compute."
+        ),
+        "bottleneck_mlp": tr(
+            "Bottleneck MLP: compresses then rebuilds a higher-level representation, "
+            "pushing the model towards a more compact feature combination."
+        ),
+        "cnn1d": tr(
+            "CNN1D: slides a convolution kernel along the ordered 1D features you "
+            "confirmed. Only appropriate when neighbouring columns really are locally "
+            "related."
+        ),
+        "resnet1d": tr(
+            "ResNet1D: residual convolution blocks over ordered 1D features. Suited to "
+            "sequence-like data; spectral column naming is not required."
+        ),
+        "grouped_fusion": tr(
+            "Grouped Fusion: a separate encoder per Feature Group, then a learned "
+            "fusion. Runs only when there are at least two meaningful groups."
+        ),
+        "mlp_embeddings": tr(
+            "Numerical-Embedding MLP: turns each numeric feature into a learnable "
+            "representation before the MLP. Captures general tabular nonlinearity."
+        ),
+        "ft_transformer": tr(
+            "FT-Transformer: treats each feature as a token and models feature "
+            "interaction with attention. Good for general tabular data, but slower."
+        ),
+        "modern_nca": tr(
+            "ModernNCA: learns an embedding where similar targets sit close together, "
+            "then predicts from neighbours. Useful for exploring local sample structure."
+        ),
+        "tabm": tr(
+            "TabM: a parameter-shared multi-member tabular network ensemble. Runs only "
+            "when the optional package is installed."
+        ),
+        "realmlp": tr(
+            "RealMLP: pytabkit's tuned tabular MLP configuration. Joins the comparison "
+            "when the optional package is installed."
+        ),
+        "catboost": tr(
+            "CatBoost: gradient-boosted decision trees, strong on general tabular "
+            "nonlinearity. Needs the optional package installed."
+        ),
+        "xgboost": tr(
+            "XGBoost: regularized gradient-boosted trees. Adds the common tabular "
+            "boosting comparison, and more compute."
+        ),
+        "lightgbm": tr(
+            "LightGBM: leaf-wise gradient-boosted trees, usually fast. Needs the "
+            "optional package installed."
+        ),
+    }
 
-AUGMENTATION_HELP = {
-    "c_mixup": "C-Mixup：依目標值相近程度挑選兩筆訓練資料並內插 X 與 y；勾選後會建立 target-aware synthetic rows。",
-    "calibrated_noise": "Calibrated noise：依訓練特徵離散程度對 X 加入小幅隨機雜訊，y 保持來源值；用來模擬量測變動。",
-    "spectral_perturbation": "Spectral perturbation：沿有效波長軸加入平滑基線、倍率與雜訊變化；非光譜 Experiment 會自動略過。",
-    "feature_masking": "Feature masking：訓練時隨機遮蔽部分已縮放特徵；迫使模型不要過度依賴單一欄位。",
-    "foma": "FOMA：對 fold-training 的聯合 X/y 做 SVD 並縮放非主要流形成分；用來產生流形附近的 synthetic rows。",
-}
+
+def loss_help() -> dict[str, str]:
+    """What each neural loss emphasises, and what ticking it adds to the run."""
+
+    return {
+        "mse": tr(
+            "MSE: squares the error, so large outlying deviations dominate. Ticking it "
+            "trains one more MSE configuration for every neural model."
+        ),
+        "huber": tr(
+            "Huber / SmoothL1: squared for small errors, roughly linear for large ones, "
+            "which limits how much outliers steer neural training."
+        ),
+        "mae": tr(
+            "MAE / L1: every absolute error counts in proportion. Less sensitive to "
+            "outliers, but the gradient is less smooth."
+        ),
+        "log_cosh": tr(
+            "Log-cosh: close to MSE for small errors and to MAE for large ones — a "
+            "smooth, outlier-tolerant compromise."
+        ),
+    }
+
+
+def augmentation_help() -> dict[str, str]:
+    """What each training-only augmentation assumes about plausible new data."""
+
+    return {
+        "c_mixup": tr(
+            "C-Mixup: picks two training rows with similar target values and "
+            "interpolates both X and y, producing target-aware synthetic rows."
+        ),
+        "calibrated_noise": tr(
+            "Calibrated noise: adds small random noise to X, scaled by how spread the "
+            "training features are, and keeps y at its source value. Models measurement "
+            "variation."
+        ),
+        "spectral_perturbation": tr(
+            "Spectral perturbation: adds smooth baseline, multiplicative and noise "
+            "variation along a valid wavelength axis. Non-spectral Experiments are "
+            "skipped automatically."
+        ),
+        "feature_masking": tr(
+            "Feature masking: randomly masks some scaled features during training, so "
+            "the model cannot lean too hard on one column."
+        ),
+        "foma": tr(
+            "FOMA: takes an SVD of the fold-training joint X/y and shrinks the "
+            "non-leading manifold components, producing synthetic rows near the "
+            "manifold."
+        ),
+    }
 
 
 class DatasetDropFrame(QFrame):
@@ -154,7 +267,7 @@ class DatasetDropFrame(QFrame):
         self.setAcceptDrops(True)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         layout = QVBoxLayout(self)
-        label = QLabel("將 CSV / Excel 檔拖曳到這裡，或按下方按鈕選擇")
+        label = QLabel(tr("Drag a CSV / Excel file here, or use the button below"))
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(label)
         self.setMinimumHeight(70)
@@ -212,10 +325,25 @@ class CollapsibleSection(QWidget):
 
 
 class ExperimentTableModel(QAbstractTableModel):
-    HEADERS = (
-        "使用", "ID", "Inputs", "Outputs", "有效列", "輸入欄數", "輸出欄數",
-        "Stable Key", "Target Task", "Feature Structure", "結構確認",
-    )
+    COLUMN_COUNT = 11
+
+    @staticmethod
+    def headers() -> tuple[str, ...]:
+        """Column labels, resolved per call so a language switch re-renders them."""
+
+        return (
+            tr("Use"),
+            "ID",
+            "Inputs",
+            "Outputs",
+            tr("Valid rows"),
+            tr("Input columns"),
+            tr("Output columns"),
+            "Stable Key",
+            "Target Task",
+            "Feature Structure",
+            tr("Structure confirmed"),
+        )
 
     def __init__(self, catalog: ExperimentCatalog, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -225,11 +353,11 @@ class ExperimentTableModel(QAbstractTableModel):
         return 0 if parent.isValid() else len(self.catalog.records)
 
     def columnCount(self, parent: QModelIndex = QModelIndex()) -> int:
-        return 0 if parent.isValid() else len(self.HEADERS)
+        return 0 if parent.isValid() else self.COLUMN_COUNT
 
     def headerData(self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if role == Qt.ItemDataRole.DisplayRole and orientation == Qt.Orientation.Horizontal:
-            return self.HEADERS[section]
+            return self.headers()[section]
         return None
 
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
@@ -262,14 +390,24 @@ class ExperimentTableModel(QAbstractTableModel):
             if column == 3:
                 return "\n".join(record.output_columns)
             if column == 0:
-                return "取消勾選即可讓這個組合不參與訓練；重新產生組合時會依 Stable Key 保留選擇。"
+                return tr(
+                    "Untick a combination to leave it out of training. Regenerating the "
+                    "combinations keeps your choice, matched by Stable Key."
+                )
             if column == 9:
                 return (
                     f"Feature Groups: {', '.join(record.feature_groups)}\n"
-                    "可修改自動建議；CNN1D/ResNet1D/Grouped Fusion 只會執行已確認且相容的組合。"
+                    + tr(
+                        "You can change the automatic suggestion. CNN1D, ResNet1D and "
+                        "Grouped Fusion only run on combinations that are both confirmed "
+                        "and compatible."
+                    )
                 )
             if column == 10:
-                return "確認 Feature Structure 與實際資料語意一致後再勾選。"
+                return tr(
+                    "Tick this only after confirming the Feature Structure matches what "
+                    "the data actually means."
+                )
         if role == Qt.ItemDataRole.UserRole:
             return record.stable_key
         return None
@@ -646,7 +784,7 @@ class BenchmarkWorker(QThread):
                 self.jobs, compatible_by_job, steps_by_job
             ):
                 if self.isInterruptionRequested():
-                    self.cancelled.emit("已取消訓練。")
+                    self.cancelled.emit(tr("Run cancelled."))
                     return
                 self.log_message.emit(f"[{spec.experiment_id}] {record.display_name}")
                 for method in self.config.selected_augmentations:
@@ -670,7 +808,7 @@ class BenchmarkWorker(QThread):
                 )
                 prepared_by_experiment[record.stable_key] = (X, y, identity)
                 if self.observation_ref is None:
-                    self.log_message.emit("  警告：未指定 Observation ID，目前使用列位置作為對齊備援。")
+                    self.log_message.emit(tr("  Warning: no Observation ID was named; row position is used as the alignment fallback."))
                 self.log_message.emit(f"  rows={len(X)}, dropped={dropped}, grouped={identity.is_grouped}")
                 def on_progress(state: ProgressState, experiment_id: str = spec.experiment_id) -> None:
                     if self.isInterruptionRequested():
@@ -1064,7 +1202,7 @@ class BenchmarkWorker(QThread):
             ).build(self.output_folder)
             self.completed.emit(artifacts)
         except InterruptedError:
-            self.cancelled.emit("已取消訓練。")
+            self.cancelled.emit(tr("Run cancelled."))
         except Exception as exc:
             import traceback
 
@@ -1096,18 +1234,20 @@ class TrainingPage(QWidget):
         self.structure_memory: dict[str, tuple[FeatureStructure, bool]] = {}
         self.training_log_path: Path | None = None
         self.current_run_output_folder: Path | None = None
+        self.dataset_path: str | None = None
         self._role_change_guard = False
         self.setting_help_labels: list[QLabel] = []
         self.setting_help_controls: list[QWidget] = []
         self._build_ui()
 
     def _build_ui(self) -> None:
-        layout = QVBoxLayout(self)
+        layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(layout)
         self.tabs = QTabWidget()
-        self.tabs.addTab(self._build_data_tab(), "1. 資料與組合")
-        self.tabs.addTab(self._build_config_tab(), "2. 評估設定")
-        self.tabs.addTab(self._build_run_tab(), "3. 執行與報告")
+        self.tabs.addTab(self._build_data_tab(), tr("1. Data and combinations"))
+        self.tabs.addTab(self._build_config_tab(), tr("2. Evaluation settings"))
+        self.tabs.addTab(self._build_run_tab(), tr("3. Run and report"))
         layout.addWidget(self.tabs)
 
     def _build_data_tab(self) -> QWidget:
@@ -1117,35 +1257,50 @@ class TrainingPage(QWidget):
         drop.file_dropped.connect(self.load_dataset)
         layout.addWidget(drop)
         row = QHBoxLayout()
-        browse = QPushButton("選擇資料檔")
+        browse = QPushButton(tr("Choose a data file"))
         browse.clicked.connect(self.browse_dataset)
-        self.dataset_label = QLabel("尚未載入資料")
-        preview = QPushButton("產生／更新排列組合")
+        self.dataset_label = QLabel(tr("No data loaded"))
+        preview = QPushButton(tr("Generate / refresh combinations"))
         preview.clicked.connect(self.generate_preview)
         row.addWidget(browse)
         row.addWidget(self.dataset_label, 1)
         row.addWidget(preview)
         layout.addLayout(row)
-        self.dataset_summary = QLabel("Observation ID 與 Group ID 不會進入模型特徵。")
+        self.dataset_summary = QLabel(
+            tr("Observation ID and Group ID never become model features.")
+        )
         self.dataset_summary.setWordWrap(True)
         layout.addWidget(self.dataset_summary)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.role_tree = QTreeWidget()
         self.role_tree.setColumnCount(6)
-        self.role_tree.setHeaderLabels(("Sheet / 欄位", "角色", "型態", "列數", "缺失", "稽核資訊"))
+        self.role_tree.setHeaderLabels(
+            (
+                tr("Sheet / column"),
+                tr("Role"),
+                tr("Type"),
+                tr("Rows"),
+                tr("Missing"),
+                tr("Audit"),
+            )
+        )
         splitter.addWidget(self.role_tree)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
         tools = QHBoxLayout()
-        self.combo_label = QLabel("尚未產生組合")
+        self.combo_label = QLabel(tr("No combinations generated yet"))
         self.filter_edit = QLineEdit()
-        self.filter_edit.setPlaceholderText("篩選 ID、Inputs、Outputs、Stable Key…")
-        all_button = QPushButton("全選")
-        none_button = QPushButton("全不選")
-        invert_button = QPushButton("反選")
-        confirm_structures_button = QPushButton("確認已選組合的結構建議")
+        self.filter_edit.setPlaceholderText(
+            tr("Filter by ID, Inputs, Outputs or Stable Key…")
+        )
+        all_button = QPushButton(tr("Select all"))
+        none_button = QPushButton(tr("Select none"))
+        invert_button = QPushButton(tr("Invert"))
+        confirm_structures_button = QPushButton(
+            tr("Confirm the suggested structure for the selected combinations")
+        )
         tools.addWidget(self.combo_label)
         tools.addWidget(self.filter_edit, 1)
         tools.addWidget(all_button)
@@ -1216,30 +1371,47 @@ class TrainingPage(QWidget):
         layout = QGridLayout(tab)
         evaluation = QGroupBox(f"Evaluation Strategy {HELP_GLYPH}")
         evaluation.setToolTip(
-            "決定如何產生泛化證據；這不是參數 preset，切換策略只會停用不適用欄位並保留原數值。"
+            tr(
+                "Decides how generalization evidence is produced. This is not a "
+                "parameter preset: switching strategy only disables the fields that do "
+                "not apply, and keeps the values you entered."
+            )
         )
         form = QFormLayout(evaluation)
         self.strategy_combo = QComboBox()
         strategy_rows = (
             (
-                "兩階段 Benchmark：CV Screening + optional Confirmation",
+                tr("Two-stage benchmark: CV Screening + optional Confirmation"),
                 EvaluationStrategy.NESTED_CV,
-                "以 development data 做 K-fold Screening，可選 repeated nested Confirmation；忽略 Test ratio 與 External mapping。",
+                tr(
+                    "K-fold Screening on the development data, with optional repeated "
+                    "nested Confirmation. Test ratio and External mapping are ignored."
+                ),
             ),
             (
-                "Holdout：單次 Train/Test split",
+                tr("Holdout: one Train/Test split"),
                 EvaluationStrategy.HOLDOUT,
-                "依 Test ratio 隨機切出一次測試集；忽略 Screening folds、Confirmation 與 External mapping。",
+                tr(
+                    "Splits off one test set at random according to Test ratio. "
+                    "Screening folds, Confirmation and External mapping are ignored."
+                ),
             ),
             (
-                "External Validation：獨立第二資料集",
+                tr("External Validation: an independent second dataset"),
                 EvaluationStrategy.EXTERNAL_VALIDATION,
-                "先用 development CV 選定設定，再只對映射後的外部資料評估一次；忽略 Test ratio。",
+                tr(
+                    "Selects the configuration with development CV, then evaluates once "
+                    "against the mapped external data. Test ratio is ignored."
+                ),
             ),
             (
-                "Train Final Model Only：只訓練、不評估",
+                tr("Train Final Model Only: train, do not evaluate"),
                 EvaluationStrategy.TRAIN_FINAL_ONLY,
-                "全部 development rows 直接建立 final model；忽略 Test ratio、folds、Confirmation 與 External mapping，不產生泛化指標。",
+                tr(
+                    "Builds the final model straight from every development row. Test "
+                    "ratio, folds, Confirmation and External mapping are ignored, and no "
+                    "generalization metric is produced."
+                ),
             ),
         )
         for label, strategy, explanation in strategy_rows:
@@ -1251,7 +1423,11 @@ class TrainingPage(QWidget):
             )
         self._help_control(
             self.strategy_combo,
-            "Evaluation Strategy 決定證據流程，不會像 Run preset 一樣改寫 epochs 等數值；不適用設定會停用並在執行時忽略。",
+            tr(
+                "Evaluation Strategy picks the evidence workflow. Unlike Run preset it "
+                "never rewrites values such as epochs; settings that do not apply are "
+                "disabled and ignored at run time."
+            ),
         )
         self.test_spin = QDoubleSpinBox()
         self.test_spin.setRange(0.0, 50.0)
@@ -1264,68 +1440,111 @@ class TrainingPage(QWidget):
         self.seed_spin = QSpinBox()
         self.seed_spin.setRange(0, 2_147_483_647)
         self.seed_spin.setValue(42)
-        self.refit_check = QCheckBox("評估完成後，以全部資料重新 fit final model")
+        self.refit_check = QCheckBox(
+            tr("After evaluation, refit the final model on all available data")
+        )
         self.refit_check.setChecked(True)
-        self.run_confirmation_check = QCheckBox("Screening 後執行 repeated nested Confirmation")
+        self.run_confirmation_check = QCheckBox(
+            tr("Run repeated nested Confirmation after Screening")
+        )
         self.run_confirmation_check.setChecked(False)
         self.finalists_spin = QSpinBox(); self.finalists_spin.setRange(1, 20); self.finalists_spin.setValue(5)
         self.confirmation_outer_folds_spin = QSpinBox(); self.confirmation_outer_folds_spin.setRange(2, 10); self.confirmation_outer_folds_spin.setValue(5)
         self.confirmation_outer_repeats_spin = QSpinBox(); self.confirmation_outer_repeats_spin.setRange(1, 20); self.confirmation_outer_repeats_spin.setValue(3)
         self.confirmation_inner_folds_spin = QSpinBox(); self.confirmation_inner_folds_spin.setRange(2, 10); self.confirmation_inner_folds_spin.setValue(3)
         self.tuning_budget_spin = QSpinBox(); self.tuning_budget_spin.setRange(1, 100); self.tuning_budget_spin.setValue(8)
-        self.confirmation_aug_check = QCheckBox("以相同 outer folds 比較 Original 與已選 augmentation")
+        self.confirmation_aug_check = QCheckBox(
+            tr("Compare Original against the selected augmentation on identical outer folds")
+        )
         self.confirmation_aug_check.setChecked(True)
         self._add_help_row(
-            form, "策略", self.strategy_combo,
-            "選擇泛化證據的產生方式；它不是 preset，不會改寫下方數值，只會使用或忽略對應欄位。",
+            form, tr("Strategy"), self.strategy_combo,
+            tr(
+                "Chooses how generalization evidence is produced. It is not a preset: it "
+                "never rewrites the values below, it only uses or ignores the matching "
+                "fields."
+            ),
         )
         self._add_help_row(
-            form, "Test ratio", self.test_spin,
-            "只供 Holdout 使用：依百分比分出一次測試資料；設為 0% 時全部資料用於 final fit，但不產生測試證據。",
+            form, tr("Test ratio"), self.test_spin,
+            tr(
+                "Holdout only: splits off one test set by percentage. At 0% every row "
+                "goes into the final fit, and no test evidence is produced."
+            ),
         )
         self._add_help_row(
-            form, "Screening folds", self.folds_spin,
-            "把 development data 輪流切成 K 份，每次用一份評估、其餘訓練；K 越大評估次數與時間越多。",
+            form, tr("Screening folds"), self.folds_spin,
+            tr(
+                "Cuts the development data into K parts, evaluating on one and training "
+                "on the rest in turn. A larger K means more evaluations and more time."
+            ),
         )
         self._add_help_row(
-            form, "Random seed", self.seed_spin,
-            "控制資料切分、初始化與 augmentation 的隨機序列；相同資料與設定使用相同 seed 可重現結果。",
+            form, tr("Random seed"), self.seed_spin,
+            tr(
+                "Controls the random sequence for splitting, initialization and "
+                "augmentation. The same data, settings and seed reproduce the result."
+            ),
         )
         self._help_control(
             self.refit_check,
-            "評估結束並選定設定後，以全部 development rows 重新訓練可保存的 final model；這個 fit 不會產生泛化證據。",
+            tr(
+                "Once evaluation has chosen a configuration, retrain a deployable final "
+                "model on every development row. That fit is not generalization evidence."
+            ),
             append_question=True,
         )
         form.addRow(self.refit_check)
         self._help_control(
             self.run_confirmation_check,
-            "將 Screening 晉級的候選模型再做 repeated nested CV；結果較可靠但運算量顯著增加，只適用 CV 型策略。",
+            tr(
+                "Re-runs the candidates promoted from Screening through repeated nested "
+                "CV. More reliable, substantially more compute, CV strategies only."
+            ),
             append_question=True,
         )
         form.addRow(self.run_confirmation_check)
         self._add_help_row(
-            form, "Finalists / Target Task", self.finalists_spin,
-            "每個相同輸出目標最多晉級多少候選設定到 Confirmation；數量越多，確認時間越長。",
+            form, tr("Finalists / Target Task"), self.finalists_spin,
+            tr(
+                "How many candidate configurations per identical output target are "
+                "promoted to Confirmation. More finalists means a longer Confirmation."
+            ),
         )
         self._add_help_row(
-            form, "Confirmation outer folds", self.confirmation_outer_folds_spin,
-            "Confirmation 外層 CV 的切分數；每個 outer test fold 都完全不參與該次調參與訓練。",
+            form, tr("Confirmation outer folds"), self.confirmation_outer_folds_spin,
+            tr(
+                "How many splits the outer Confirmation CV uses. Every outer test fold "
+                "stays entirely out of that round's tuning and training."
+            ),
         )
         self._add_help_row(
-            form, "Confirmation outer repeats", self.confirmation_outer_repeats_spin,
-            "用不同 seed 重複整套 outer CV；可估計結果變異，但運算量近似按次數倍增。",
+            form, tr("Confirmation outer repeats"), self.confirmation_outer_repeats_spin,
+            tr(
+                "Repeats the whole outer CV with different seeds, which estimates the "
+                "variance of the result and multiplies the compute accordingly."
+            ),
         )
         self._add_help_row(
-            form, "Confirmation inner folds", self.confirmation_inner_folds_spin,
-            "只在每個 outer training partition 內做 inner CV 選參數；可避免用 outer test data 調參。",
+            form, tr("Confirmation inner folds"), self.confirmation_inner_folds_spin,
+            tr(
+                "Inner CV runs only inside each outer training partition, so parameters "
+                "are never tuned against outer test data."
+            ),
         )
         self._add_help_row(
-            form, "Tuning budget / finalist", self.tuning_budget_spin,
-            "每個 finalist 在每個 outer fold 最多嘗試的參數組數；數值越大搜尋更廣但耗時增加。",
+            form, tr("Tuning budget / finalist"), self.tuning_budget_spin,
+            tr(
+                "How many parameter sets each finalist may try per outer fold. A larger "
+                "budget searches wider and takes longer."
+            ),
         )
         self._help_control(
             self.confirmation_aug_check,
-            "在完全相同的 outer folds 上比較 Original 與啟用的 augmentation；Original only 時此項會被忽略。",
+            tr(
+                "Compares Original against the enabled augmentation on exactly the same "
+                "outer folds. Ignored under Original only."
+            ),
             append_question=True,
         )
         form.addRow(self.confirmation_aug_check)
@@ -1333,7 +1552,12 @@ class TrainingPage(QWidget):
         self.strategy_description_label.setWordWrap(True)
         self.strategy_description_label.setStyleSheet("color: #315a7d; padding: 4px;")
         form.addRow(self.strategy_description_label)
-        note = QLabel("提示：灰色欄位代表目前策略不使用；切換策略後原輸入值仍會保留。")
+        note = QLabel(
+            tr(
+                "Note: a greyed-out field is one the current strategy does not use. "
+                "Switching strategy keeps whatever you typed."
+            )
+        )
         note.setWordWrap(True)
         form.addRow(note)
         self.confirmation_controls = (
@@ -1348,9 +1572,18 @@ class TrainingPage(QWidget):
         self.run_confirmation_check.toggled.connect(self._update_strategy_controls)
         layout.addWidget(evaluation, 0, 0)
 
-        models_box = QGroupBox(f"模型（灰色項目刻意保留，以免後續遺漏） {HELP_GLYPH}")
-        models_box.setToolTip("勾選要比較的模型；每增加一個模型都會依 scaler、loss、augmentation 與 repetitions 展開更多訓練。")
+        models_box = QGroupBox(
+            tr("Models (greyed-out entries are kept on purpose, so none is forgotten)")
+            + f" {HELP_GLYPH}"
+        )
+        models_box.setToolTip(
+            tr(
+                "Tick the models to compare. Each extra model expands into more training "
+                "runs across the selected scalers, losses, augmentations and repetitions."
+            )
+        )
         models_layout = QGridLayout(models_box)
+        helps = model_help()
         for index, capability in enumerate(model_registry()):
             check = QCheckBox(capability.display_name)
             check.setEnabled(capability.enabled)
@@ -1359,19 +1592,32 @@ class TrainingPage(QWidget):
                 check.setText(f"{capability.display_name} — Coming Later")
             elif not capability.enabled:
                 check.setText(f"{capability.display_name} — Inactive")
-            model_explanation = MODEL_HELP.get(
+            model_explanation = helps.get(
                 capability.model_id,
-                "勾選後會在每個相容 Experiment 中加入此模型比較；模型越多，總運算時間越長。",
+                tr(
+                    "Ticking this adds the model to every compatible Experiment. More "
+                    "models means more total run time."
+                ),
             )
             if not capability.enabled:
-                model_explanation += f" 目前不可執行：{capability.reason}"
+                model_explanation += " " + tr(
+                    "Currently unavailable: {reason}", reason=capability.reason
+                )
             self._help_control(check, model_explanation, append_question=True)
             self.model_checks[capability.model_id] = check
             models_layout.addWidget(check, index // 2, index % 2)
         layout.addWidget(models_box, 0, 1)
 
-        advanced = QGroupBox(f"進階訓練設定（Preset 只會填入預設值，所有欄位仍可修改） {HELP_GLYPH}")
-        advanced.setToolTip("控制 neural training、重複次數與特徵縮放；Run preset 是唯一會立即改寫部分數值的 preset。")
+        advanced = QGroupBox(
+            tr("Advanced training settings (a preset only fills in defaults; every field stays editable)")
+            + f" {HELP_GLYPH}"
+        )
+        advanced.setToolTip(
+            tr(
+                "Controls neural training, repetitions and feature scaling. Run preset is "
+                "the only preset that immediately rewrites some of these values."
+            )
+        )
         advanced_form = QFormLayout(advanced)
         self.run_preset_combo = QComboBox()
         self.run_preset_combo.addItem("Economy", "economy")
@@ -1379,10 +1625,19 @@ class TrainingPage(QWidget):
         self.run_preset_combo.addItem("Rigorous", "rigorous")
         self.run_preset_combo.addItem("Custom", "custom")
         preset_help = {
-            "economy": "快速預覽：降低 epochs、patience 與 repetitions，較省時間但結果穩定性較低。",
-            "balanced": "平衡模式：使用中等 epochs、patience 與 3 次 repetitions，兼顧時間與穩定性。",
-            "rigorous": "嚴謹模式：提高 epochs、patience、模型寬度與 5 次 repetitions，運算量大幅增加。",
-            "custom": "自訂模式：不改寫任何數值，保留目前手動設定。",
+            "economy": tr(
+                "Quick look: fewer epochs, less patience and fewer repetitions. Saves "
+                "time, with less stable results."
+            ),
+            "balanced": tr(
+                "Balanced: moderate epochs and patience with 3 repetitions, trading time "
+                "against stability."
+            ),
+            "rigorous": tr(
+                "Rigorous: more epochs, more patience, wider models and 5 repetitions. "
+                "Substantially more compute."
+            ),
+            "custom": tr("Custom: rewrites nothing and keeps your current settings."),
         }
         for index in range(self.run_preset_combo.count()):
             self.run_preset_combo.setItemData(
@@ -1399,9 +1654,18 @@ class TrainingPage(QWidget):
         self.validation_spin = QDoubleSpinBox(); self.validation_spin.setRange(0.05, 0.50); self.validation_spin.setSingleStep(0.05); self.validation_spin.setValue(0.20)
         scaler_row = QWidget(); scaler_layout = QHBoxLayout(scaler_row); scaler_layout.setContentsMargins(0, 0, 0, 0)
         scaler_help = {
-            "standard": "Standard scaler：以 training fold 的平均值與標準差轉成約為零均值、單位尺度；適合多數模型。",
-            "robust": "Robust scaler：以中位數與四分位距縮放；較不受離群值影響。",
-            "minmax": "MinMax scaler：依 training fold 最小與最大值縮放到固定範圍；對極端值較敏感。",
+            "standard": tr(
+                "Standard scaler: uses the training fold's mean and standard deviation to "
+                "reach roughly zero mean and unit scale. Suits most models."
+            ),
+            "robust": tr(
+                "Robust scaler: scales by the median and interquartile range, so outliers "
+                "matter less."
+            ),
+            "minmax": tr(
+                "MinMax scaler: scales into a fixed range using the training fold's "
+                "minimum and maximum. More sensitive to extreme values."
+            ),
         }
         for scaler_id, label in (("standard", "Standard"), ("robust", "Robust"), ("minmax", "MinMax")):
             check = QCheckBox(label)
@@ -1410,84 +1674,145 @@ class TrainingPage(QWidget):
             self.scaler_checks[scaler_id] = check
             scaler_layout.addWidget(check)
         self._add_help_row(
-            advanced_form, "Run preset", self.run_preset_combo,
-            "真正的參數 preset：切換 Economy／Balanced／Rigorous 會立即改寫 epochs、patience、repetitions、validation ratio 與 model multiplier；其他欄位不變。",
+            advanced_form, tr("Run preset"), self.run_preset_combo,
+            tr(
+                "The one real parameter preset: choosing Economy, Balanced or Rigorous "
+                "immediately rewrites epochs, patience, repetitions, validation ratio and "
+                "model multiplier. Nothing else changes."
+            ),
         )
         self._add_help_row(
-            advanced_form, "Epochs", self.epochs_spin,
-            "Neural model 最多完整掃過 training data 的次數；較大可能學得更充分，但會增加時間並可能過擬合。",
+            advanced_form, tr("Epochs"), self.epochs_spin,
+            tr(
+                "How many complete passes over the training data a neural model may make. "
+                "More can learn more, at the cost of time and overfitting risk."
+            ),
         )
         self._add_help_row(
-            advanced_form, "Early-stopping patience", self.patience_spin,
-            "Validation loss 連續多少 epochs 沒改善才停止；較大會等待更久，較小可能過早停止。",
+            advanced_form, tr("Early-stopping patience"), self.patience_spin,
+            tr(
+                "How many epochs without validation-loss improvement to allow before "
+                "stopping. Larger waits longer; smaller may stop too early."
+            ),
         )
         self._add_help_row(
-            advanced_form, "Batch size", self.batch_spin,
-            "每次梯度更新使用的 training rows 數；較大通常較快但耗記憶體，較小更新較有隨機性。",
+            advanced_form, tr("Batch size"), self.batch_spin,
+            tr(
+                "How many training rows each gradient update uses. Larger is usually "
+                "faster but needs more memory; smaller makes updates noisier."
+            ),
         )
         self._add_help_row(
-            advanced_form, "Learning rate", self.learning_rate_spin,
-            "Neural optimizer 每次更新權重的步幅；太大可能不穩定，太小會收斂緩慢。",
+            advanced_form, tr("Learning rate"), self.learning_rate_spin,
+            tr(
+                "The step size the neural optimizer takes per weight update. Too large is "
+                "unstable; too small converges slowly."
+            ),
         )
         self._add_help_row(
-            advanced_form, "Model width multiplier", self.model_multiplier_spin,
-            "按倍率放大或縮小 neural hidden width；較大增加模型容量、記憶體與過擬合風險。",
+            advanced_form, tr("Model width multiplier"), self.model_multiplier_spin,
+            tr(
+                "Scales the neural hidden width up or down. Larger raises capacity, "
+                "memory use and overfitting risk together."
+            ),
         )
         self._add_help_row(
-            advanced_form, "Training repetitions", self.repetitions_spin,
-            "用不同隨機初始化重複每個 configuration 並彙整預測；可降低偶然性，但時間近似按倍數增加。",
+            advanced_form, tr("Training repetitions"), self.repetitions_spin,
+            tr(
+                "Repeats every configuration with a different random initialization and "
+                "pools the predictions. Reduces luck, multiplies the time."
+            ),
         )
         self._add_help_row(
-            advanced_form, "Internal validation ratio", self.validation_spin,
-            "只從 neural model 的 fold-training partition 再切一部分監控 early stopping；不會取用 fold test data。",
+            advanced_form, tr("Internal validation ratio"), self.validation_spin,
+            tr(
+                "Carves an early-stopping watch set out of the neural model's "
+                "fold-training partition only. Fold test data is never touched."
+            ),
         )
         self._help_control(
             scaler_row,
-            "勾選一種或多種 fold-local scaling；每多一種 scaler 都會增加一整組 model configurations。",
+            tr(
+                "Tick one or more fold-local scalings. Each extra scaler adds a whole set "
+                "of model configurations."
+            ),
         )
         advanced_form.addRow(
             self._help_label(
-                "Scalers",
-                "控制每個 training fold 如何縮放 X 與 y；每個勾選 scaler 都會分開訓練與評估。",
+                tr("Scalers"),
+                tr(
+                    "Controls how X and y are scaled inside each training fold. Every "
+                    "ticked scaler is trained and evaluated separately."
+                ),
             ),
             scaler_row,
         )
         self.run_preset_combo.currentIndexChanged.connect(self._apply_run_preset)
         layout.addWidget(advanced, 1, 0)
 
-        losses = QGroupBox(f"Loss functions（只套用於支援自訂 loss 的 neural adapters） {HELP_GLYPH}")
-        losses.setToolTip("Loss 決定 neural model 訓練時如何衡量預測誤差；每多勾一種就增加一組 neural configuration。")
+        losses = QGroupBox(
+            tr("Loss functions (only for neural adapters that accept a custom loss)")
+            + f" {HELP_GLYPH}"
+        )
+        losses.setToolTip(
+            tr(
+                "The loss decides how a neural model measures prediction error while "
+                "training. Each extra tick adds one neural configuration."
+            )
+        )
         loss_layout = QVBoxLayout(losses)
+        loss_texts = loss_help()
         for loss_id, label, checked in (
             ("mse", "MSE", True),
-            ("huber", "Huber / SmoothL1（建議用於 noisy measurements）", True),
+            ("huber", tr("Huber / SmoothL1 (suggested for noisy measurements)"), True),
             ("mae", "MAE / L1", False),
             ("log_cosh", "Log-cosh", False),
         ):
             check = QCheckBox(label)
             check.setChecked(checked)
-            self._help_control(check, LOSS_HELP[loss_id], append_question=True)
+            self._help_control(check, loss_texts[loss_id], append_question=True)
             self.loss_checks[loss_id] = check
             loss_layout.addWidget(check)
-        loss_note = QLabel("Classical models 使用其原生 objective，不會因勾選多個 loss 而重複執行。")
+        loss_note = QLabel(
+            tr(
+                "Classical models use their own native objective, so ticking several "
+                "losses does not run them more than once."
+            )
+        )
         loss_note.setWordWrap(True); loss_layout.addWidget(loss_note)
         layout.addWidget(losses, 1, 1)
 
         augmentation = CollapsibleSection(f"Augmentation policy {HELP_GLYPH}", expanded=False)
         augmentation.toggle_button.setToolTip(
-            "決定 synthetic training rows 如何加入比較；Original only 會忽略所有已勾選 methods。"
+            tr(
+                "Decides how synthetic training rows enter the comparison. Original only "
+                "ignores every ticked method."
+            )
         )
         self.augmentation_section = augmentation
         aug_layout = QFormLayout()
         augmentation.setContentLayout(aug_layout)
         self.augmentation_policy_combo = QComboBox()
-        self.augmentation_policy_combo.addItem("Original only（不做 augmentation）", "original_only")
-        self.augmentation_policy_combo.addItem("與原始資料分開比較（建議）", "compare_separately")
-        self.augmentation_policy_combo.addItem("合併已勾選方法", "combined")
+        self.augmentation_policy_combo.addItem(
+            tr("Original only (no augmentation)"), "original_only"
+        )
+        self.augmentation_policy_combo.addItem(
+            tr("Compare separately against the original data (suggested)"), "compare_separately"
+        )
+        self.augmentation_policy_combo.addItem(tr("Combine the ticked methods"), "combined")
         policy_help = {
-            "original_only": "只建立 Original configuration；methods 的勾選狀態會保留但執行時完全忽略。",
-            "compare_separately": "建立 Original 與每個已勾選 method 的獨立 configuration，可直接判斷各方法是否改善結果。",
-            "combined": "建立 Original 與一個合併所有已勾選 methods 的 configuration；可測組合效果但無法分辨單一方法貢獻。",
+            "original_only": tr(
+                "Builds the Original configuration only. Your method ticks are kept but "
+                "completely ignored at run time."
+            ),
+            "compare_separately": tr(
+                "Builds Original plus one separate configuration per ticked method, so you "
+                "can see directly whether each method improves the result."
+            ),
+            "combined": tr(
+                "Builds Original plus one configuration combining every ticked method. "
+                "Tests the combination, but cannot attribute the effect to one method."
+            ),
         }
         for index in range(self.augmentation_policy_combo.count()):
             self.augmentation_policy_combo.setItemData(
@@ -1496,36 +1821,50 @@ class TrainingPage(QWidget):
                 Qt.ItemDataRole.ToolTipRole,
             )
         self._add_help_row(
-            aug_layout, "Policy", self.augmentation_policy_combo,
-            "控制 augmentation configurations 的展開方式；Original only 不做 augmentation，Separate 分開比較，Combined 合併方法。",
+            aug_layout, tr("Policy"), self.augmentation_policy_combo,
+            tr(
+                "Controls how augmentation configurations expand: Original only skips "
+                "augmentation, Separate compares each method on its own, Combined applies "
+                "them together."
+            ),
         )
         method_widget = QWidget(); method_layout = QGridLayout(method_widget); method_layout.setContentsMargins(0, 0, 0, 0)
         methods = (
-            ("c_mixup", "C-Mixup（target-aware）"),
-            ("calibrated_noise", "Calibrated feature noise"),
-            ("spectral_perturbation", "Spectral perturbation（需有效波長軸）"),
-            ("feature_masking", "Training-time feature masking"),
+            ("c_mixup", tr("C-Mixup (target-aware)")),
+            ("calibrated_noise", tr("Calibrated feature noise")),
+            ("spectral_perturbation", tr("Spectral perturbation (needs a valid wavelength axis)")),
+            ("feature_masking", tr("Training-time feature masking")),
             ("foma", "FOMA (First-Order Manifold Data Augmentation)"),
         )
+        augmentation_texts = augmentation_help()
         for index, (method_id, label) in enumerate(methods):
             check = QCheckBox(label)
-            self._help_control(check, AUGMENTATION_HELP[method_id], append_question=True)
+            self._help_control(check, augmentation_texts[method_id], append_question=True)
             self.augmentation_checks[method_id] = check
             method_layout.addWidget(check, index // 2, index % 2)
         self._help_control(
             method_widget,
-            "選擇要產生的 training-only augmentation；是否分開或合併由 Policy 決定。",
+            tr(
+                "Choose which training-only augmentations to generate. Policy decides "
+                "whether they are compared separately or combined."
+            ),
         )
         aug_layout.addRow(
             self._help_label(
-                "Methods",
-                "勾選 augmentation 演算法；Original only 時全部忽略，Separate 時各自比較，Combined 時一起套用。",
+                tr("Methods"),
+                tr(
+                    "Tick augmentation algorithms. Under Original only they are all "
+                    "ignored; under Separate each is compared on its own; under Combined "
+                    "they are applied together."
+                ),
             ),
             method_widget,
         )
         self.augmentation_repeats_spin = QSpinBox(); self.augmentation_repeats_spin.setRange(1, 100); self.augmentation_repeats_spin.setValue(1)
         self.augmentation_ratio_spin = QDoubleSpinBox(); self.augmentation_ratio_spin.setRange(0.05, 5.0); self.augmentation_ratio_spin.setSingleStep(0.25); self.augmentation_ratio_spin.setValue(0.50)
-        self.augmentation_include_original_check = QCheckBox("將原始資料加入 augmentation 訓練集")
+        self.augmentation_include_original_check = QCheckBox(
+            tr("Include the original rows in the augmented training set")
+        )
         self.augmentation_include_original_check.setChecked(True)
         self.c_mixup_alpha_spin = QDoubleSpinBox(); self.c_mixup_alpha_spin.setRange(0.05, 20.0); self.c_mixup_alpha_spin.setValue(2.0)
         self.noise_fraction_spin = QDoubleSpinBox(); self.noise_fraction_spin.setDecimals(4); self.noise_fraction_spin.setRange(0.0, 1.0); self.noise_fraction_spin.setValue(0.02)
@@ -1533,46 +1872,79 @@ class TrainingPage(QWidget):
         self.foma_alpha_spin = QDoubleSpinBox(); self.foma_alpha_spin.setRange(0.05, 20.0); self.foma_alpha_spin.setValue(2.0)
         self.foma_k_spin = QSpinBox(); self.foma_k_spin.setRange(1, 10_000); self.foma_k_spin.setValue(1)
         self._add_help_row(
-            aug_layout, "Synthetic rows / train rows", self.augmentation_ratio_spin,
-            "每次 augmentation 產生的 synthetic rows 相對於 fold-training rows 的比例；0.5 表示產生約一半數量。",
+            aug_layout, tr("Synthetic rows / train rows"), self.augmentation_ratio_spin,
+            tr(
+                "How many synthetic rows each augmentation produces relative to the "
+                "fold-training rows. 0.5 means about half as many."
+            ),
         )
         self._add_help_row(
-            aug_layout, "Augmentation repeats", self.augmentation_repeats_spin,
-            "把 synthetic row 數量再乘上此次數；增加資料量與訓練時間，但不是模型 training repetitions。",
+            aug_layout, tr("Augmentation repeats"), self.augmentation_repeats_spin,
+            tr(
+                "Multiplies the synthetic row count again. More data and more training "
+                "time — this is not the same as model training repetitions."
+            ),
         )
         self._help_control(
             self.augmentation_include_original_check,
-            "勾選時 augmented variant 使用 Original rows 加 synthetic rows；取消時該 variant 只使用 synthetic rows，Original baseline 仍保留。",
+            tr(
+                "When ticked, an augmented variant trains on the original rows plus the "
+                "synthetic ones. When cleared, that variant uses synthetic rows only; the "
+                "Original baseline is kept either way."
+            ),
             append_question=True,
         )
         aug_layout.addRow(self.augmentation_include_original_check)
         self._add_help_row(
-            aug_layout, "C-Mixup alpha", self.c_mixup_alpha_spin,
-            "Beta 分布的形狀參數，控制兩筆資料內插權重；較大更接近中間混合，較小更靠近其中一筆。",
+            aug_layout, tr("C-Mixup alpha"), self.c_mixup_alpha_spin,
+            tr(
+                "The Beta distribution shape parameter controlling the interpolation "
+                "weight between two rows. Larger mixes closer to the middle; smaller stays "
+                "closer to one of them."
+            ),
         )
         self._add_help_row(
-            aug_layout, "Noise fraction", self.noise_fraction_spin,
-            "Calibrated noise 相對於 training feature 標準差的比例；越大擾動越強，也越可能偏離合理量測範圍。",
+            aug_layout, tr("Noise fraction"), self.noise_fraction_spin,
+            tr(
+                "Calibrated noise as a fraction of the training feature's standard "
+                "deviation. Larger perturbs more, and is more likely to leave the "
+                "plausible measurement range."
+            ),
         )
         self._add_help_row(
-            aug_layout, "Mask probability", self.feature_mask_probability_spin,
-            "每個 training feature 被遮蔽為縮放後平均值的機率；越大正則化越強，也可能損失過多資訊。",
+            aug_layout, tr("Mask probability"), self.feature_mask_probability_spin,
+            tr(
+                "The chance that each training feature is masked to its scaled mean. "
+                "Larger regularizes harder, and can discard too much information."
+            ),
         )
         self._add_help_row(
-            aug_layout, "FOMA alpha", self.foma_alpha_spin,
-            "控制 FOMA 非主要奇異成分的 Beta 縮放係數；較大偏向中等縮放，較小較常接近保留或大幅壓縮。",
+            aug_layout, tr("FOMA alpha"), self.foma_alpha_spin,
+            tr(
+                "The Beta scaling coefficient FOMA applies to non-leading singular "
+                "components. Larger favours moderate scaling; smaller more often either "
+                "preserves or strongly compresses them."
+            ),
         )
         self._add_help_row(
-            aug_layout, "FOMA retained components (k)", self.foma_k_spin,
-            "FOMA 完整保留的前 k 個聯合 X/y SVD 成分；k 越大資料主結構保留越多、擾動越保守。",
+            aug_layout, tr("FOMA retained components (k)"), self.foma_k_spin,
+            tr(
+                "How many leading joint X/y SVD components FOMA keeps intact. A larger k "
+                "preserves more of the data's main structure and perturbs more "
+                "conservatively."
+            ),
         )
         self.augmentation_policy_description_label = QLabel()
         self.augmentation_policy_description_label.setWordWrap(True)
         self.augmentation_policy_description_label.setStyleSheet("color: #315a7d; padding: 4px;")
         aug_layout.addRow(self.augmentation_policy_description_label)
         aug_note = QLabel(
-            "所有方法只作用於當前 fold 的 training partition，並保留 Original baseline。"
-            "Bootstrap 不列為 augmentation；SMOGN 必須先定義 target relevance，因此本版不提供任意開關。"
+            tr(
+                "Every method acts only on the current fold's training partition, and the "
+                "Original baseline is always kept. Bootstrap is not counted as "
+                "augmentation; SMOGN needs a target relevance definition first, so this "
+                "version offers no blind switch for it."
+            )
         )
         aug_note.setWordWrap(True)
         aug_layout.addRow(aug_note)
@@ -1594,84 +1966,134 @@ class TrainingPage(QWidget):
 
         external = CollapsibleSection(f"External Validation dataset mapping {HELP_GLYPH}", expanded=False)
         external.toggle_button.setToolTip(
-            "只供 External Validation 策略使用：將 development 欄位逐一對應到獨立外部資料，模型選定後才讀取外部 target。"
+            tr(
+                "For the External Validation strategy only: map each development column to "
+                "the independent external data. The external target is read only after the "
+                "model has been selected."
+            )
         )
         self.external_validation_section = external
         external_layout = QVBoxLayout()
         external.setContentLayout(external_layout)
         external_top = QHBoxLayout()
-        external_button = QPushButton(f"載入獨立外部資料 {HELP_GLYPH}")
+        external_button = QPushButton(tr("Load independent external data") + f" {HELP_GLYPH}")
         self._help_control(
             external_button,
-            "載入完全獨立、未參與 development selection 的資料檔；只在 External Validation 策略執行一次最終評估。",
+            tr(
+                "Loads a fully independent file that took no part in development "
+                "selection. Used for exactly one final evaluation under the External "
+                "Validation strategy."
+            ),
         )
         external_button.clicked.connect(self.browse_external_dataset)
-        self.external_dataset_label = QLabel("尚未載入；只在 External Validation 策略使用")
+        self.external_dataset_label = QLabel(
+            tr("Not loaded; used by the External Validation strategy only")
+        )
         external_top.addWidget(external_button)
         external_top.addWidget(self.external_dataset_label, 1)
         external_layout.addLayout(external_top)
         self.external_observation_combo = QComboBox()
-        self.external_observation_combo.addItem("使用外部資料列位置", None)
+        self.external_observation_combo.addItem(tr("Use the external row position"), None)
         external_layout.addWidget(self._help_label(
-            "External Observation ID（選填）",
-            "選擇外部資料中可唯一識別每筆觀測的欄位；未指定時用資料列位置對齊並在報告中警告。",
+            tr("External Observation ID (optional)"),
+            tr(
+                "The column that uniquely identifies each external observation. Without "
+                "one, rows are aligned by position and the report says so."
+            ),
         ))
         self._help_control(
             self.external_observation_combo,
-            "指定外部資料的觀測識別欄；只用於追蹤與對齊，不會當成模型輸入特徵。",
+            tr(
+                "Names the external observation identifier. It is used for tracking and "
+                "alignment only, never as a model input feature."
+            ),
         )
         external_layout.addWidget(self.external_observation_combo)
         self.external_mapping_tree = QTreeWidget()
         self.external_mapping_tree.setColumnCount(2)
         self.external_mapping_tree.setHeaderLabels(
-            (f"Development 欄位 {HELP_GLYPH}", f"External 欄位 {HELP_GLYPH}")
+            (
+                tr("Development column") + f" {HELP_GLYPH}",
+                tr("External column") + f" {HELP_GLYPH}",
+            )
         )
         self._help_control(
             self.external_mapping_tree,
-            "左欄是模型建立時使用的欄位，右欄選擇外部資料的對應欄位；所有 inputs 與 target 都必須明確映射。",
+            tr(
+                "The left column lists what the model was built on; pick the matching "
+                "external column on the right. Every input and target must be mapped "
+                "explicitly."
+            ),
         )
         self.external_mapping_tree.setMinimumHeight(150)
         self.external_mapping_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         external_layout.addWidget(self.external_mapping_tree)
         external_note = QLabel(
-            "必須明確映射所有入模特徵與目標。外部 target 在 development CV／Confirmation 完成並凍結勝出設定前不會被讀取。"
+            tr(
+                "Every model feature and target must be mapped explicitly. The external "
+                "target is not read until development CV and Confirmation have finished "
+                "and the winning configuration is frozen."
+            )
         )
         external_note.setWordWrap(True)
         external_layout.addWidget(external_note)
         layout.addWidget(external, 3, 0, 1, 2)
 
-        output = QGroupBox(f"輸出 {HELP_GLYPH}")
-        output.setToolTip("指定所有實驗結果、圖表、Markdown、PDF 與 final model bundles 的主輸出資料夾。")
+        output = QGroupBox(tr("Output") + f" {HELP_GLYPH}")
+        output.setToolTip(
+            tr(
+                "The parent folder for every result, figure, Markdown file, PDF and final "
+                "model bundle."
+            )
+        )
         output_form = QFormLayout(output)
         out_row = QHBoxLayout()
         self.output_edit = QLineEdit(str(DEFAULT_OUTPUT_ROOT))
         self._help_control(
             self.output_edit,
-            "這是報告主資料夾；每次開始執行都會在其中自動建立帶時間的獨立 run 子資料夾，避免覆蓋舊結果。",
+            tr(
+                "The parent report folder. Each run creates its own timestamped subfolder "
+                "inside it, so earlier results are never overwritten."
+            ),
         )
-        choose = QPushButton(f"選擇 {HELP_GLYPH}")
-        self._help_control(choose, "開啟資料夾選擇器並把選定路徑填入 Master report 資料夾。")
+        choose = QPushButton(tr("Browse") + f" {HELP_GLYPH}")
+        self._help_control(
+            choose, tr("Opens a folder picker and fills in the Master report folder.")
+        )
         choose.clicked.connect(self.choose_output_folder)
         out_row.addWidget(self.output_edit, 1)
         out_row.addWidget(choose)
         output_form.addRow(
             self._help_label(
-                "Master report 資料夾",
-                "作為所有 Benchmark Runs 的上層目錄；每次執行會建立 run_年月日_時間_微秒子資料夾，不會搬移或覆蓋先前結果。",
+                tr("Master report folder"),
+                tr(
+                    "The parent directory for every Benchmark Run. Each run creates a "
+                    "run_<date>_<time>_<microseconds> subfolder, and never moves or "
+                    "overwrites earlier results."
+                ),
             ),
             out_row,
         )
         self.run_name_edit = QLineEdit()
-        self.run_name_edit.setPlaceholderText("例如：泰國蝦 qPCR 初篩（留空則用資料夾名稱）")
+        self.run_name_edit.setPlaceholderText(
+            tr("e.g. shrimp qPCR first pass (blank uses the folder name)")
+        )
         self._add_help_row(
             output_form,
-            "Run 名稱",
+            tr("Run name"),
             self.run_name_edit,
-            "這個名稱會寫進每個保留模型的 metadata，之後在「模型庫」頁面用來分辨不同實驗目的的訓練批次。",
+            tr(
+                "This name is written into every retained model's metadata, and is what "
+                "tells training batches with different purposes apart on the Model library "
+                "tab."
+            ),
         )
         keep_note = QLabel(
-            f"每個 Target Task 只保留排名前 {MODEL_KEEP_LIMIT} 的模型；"
-            "Reported R² 未大於 0 的模型（包含第一名）不會被儲存。"
+            tr(
+                "Only the top {limit} models per Target Task are kept. A model whose "
+                "Reported R² is not above 0 is never saved, including the first-ranked one.",
+                limit=MODEL_KEEP_LIMIT,
+            )
         )
         keep_note.setWordWrap(True)
         output_form.addRow(keep_note)
@@ -1700,17 +2122,18 @@ class TrainingPage(QWidget):
         for control in self.augmentation_detail_controls:
             control.setEnabled(uses_augmentation)
         descriptions = {
-            "original_only": (
-                "目前只執行 Original：所有已勾選 methods 與其參數都會忽略；"
-                "勾選狀態會保留，切回其他 policy 即可繼續使用。"
+            "original_only": tr(
+                "Right now only Original runs: every ticked method and its parameters are "
+                "ignored. Your ticks are kept, so switching policy resumes them."
             ),
-            "compare_separately": (
-                "目前會建立 Original baseline，再將每個已勾選 method 各自建立一個 configuration；"
-                "方法之間不混合。"
+            "compare_separately": tr(
+                "Right now this builds the Original baseline plus one configuration per "
+                "ticked method. The methods are never mixed."
             ),
-            "combined": (
-                "目前會建立 Original baseline，再建立一個合併所有已勾選 methods 的 configuration；"
-                "報告只能判斷整體組合，不能拆解單一方法貢獻。"
+            "combined": tr(
+                "Right now this builds the Original baseline plus one configuration "
+                "combining every ticked method. The report can judge the combination as a "
+                "whole, but cannot attribute the effect to one method."
             ),
         }
         self.augmentation_policy_description_label.setText(descriptions.get(policy, ""))
@@ -1740,21 +2163,28 @@ class TrainingPage(QWidget):
         self.external_validation_section.setEnabled(external)
 
         descriptions = {
-            EvaluationStrategy.NESTED_CV: (
-                "這是評估工作流程，不是 preset。使用 Screening folds；可選 Confirmation。"
-                "Test ratio 與 External mapping 會忽略，其他 training／model／loss／augmentation 設定照常使用。"
+            EvaluationStrategy.NESTED_CV: tr(
+                "This is an evaluation workflow, not a preset. It uses Screening folds, "
+                "with optional Confirmation. Test ratio and External mapping are ignored; "
+                "every other training, model, loss and augmentation setting applies as "
+                "usual."
             ),
-            EvaluationStrategy.HOLDOUT: (
-                "這是評估工作流程，不是 preset。只使用 Test ratio 做一次 Train/Test split；"
-                "Screening folds、所有 Confirmation 設定與 External mapping 會忽略。Test ratio=0% 時只做 final fit。"
+            EvaluationStrategy.HOLDOUT: tr(
+                "This is an evaluation workflow, not a preset. It uses Test ratio for one "
+                "Train/Test split. Screening folds, every Confirmation setting and "
+                "External mapping are ignored. At Test ratio = 0% it performs the final "
+                "fit only."
             ),
-            EvaluationStrategy.EXTERNAL_VALIDATION: (
-                "這是評估工作流程，不是 preset。先使用 Screening folds 在 development data 選定設定，"
-                "可選 Confirmation，最後才使用 External mapping 評估一次；Test ratio 會忽略。"
+            EvaluationStrategy.EXTERNAL_VALIDATION: tr(
+                "This is an evaluation workflow, not a preset. It selects a configuration "
+                "on the development data with Screening folds and optional Confirmation, "
+                "then evaluates once through External mapping. Test ratio is ignored."
             ),
-            EvaluationStrategy.TRAIN_FINAL_ONLY: (
-                "這是評估工作流程，不是 preset。使用全部 development rows 直接訓練 final models；"
-                "Test ratio、Screening folds、Confirmation、External mapping 與 refit 選項都會忽略，且不產生泛化指標。"
+            EvaluationStrategy.TRAIN_FINAL_ONLY: tr(
+                "This is an evaluation workflow, not a preset. It trains the final models "
+                "straight from every development row. Test ratio, Screening folds, "
+                "Confirmation, External mapping and the refit option are all ignored, and "
+                "no generalization metric is produced."
             ),
         }
         self.strategy_description_label.setText(descriptions.get(strategy, ""))
@@ -1763,9 +2193,9 @@ class TrainingPage(QWidget):
         tab = QWidget()
         layout = QVBoxLayout(tab)
         buttons = QHBoxLayout()
-        self.start_button = QPushButton("開始執行")
+        self.start_button = QPushButton(tr("Start"))
         self.start_button.clicked.connect(self.start_training)
-        self.cancel_button = QPushButton("取消")
+        self.cancel_button = QPushButton(tr("Cancel"))
         self.cancel_button.setEnabled(False)
         self.cancel_button.clicked.connect(self.cancel_training)
         buttons.addWidget(self.start_button)
@@ -1774,7 +2204,7 @@ class TrainingPage(QWidget):
         layout.addLayout(buttons)
         self.progress = QProgressBar()
         layout.addWidget(self.progress)
-        self.current_run_label = QLabel("Training log — 尚未開始")
+        self.current_run_label = QLabel(tr("Training log — not started"))
         self.current_run_label.setWordWrap(True)
         layout.addWidget(self.current_run_label)
         self.log_box = QPlainTextEdit()
@@ -1783,16 +2213,21 @@ class TrainingPage(QWidget):
         return tab
 
     def browse_dataset(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "選擇資料檔", str(Path.cwd()), "Data (*.xlsx *.xls *.csv)")
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            tr("Choose a data file"),
+            str(Path.cwd()),
+            tr("Data ({patterns})", patterns="*.xlsx *.xls *.csv"),
+        )
         if path:
             self.load_dataset(path)
 
     def browse_external_dataset(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            "選擇獨立 External Validation 資料檔",
+            tr("Choose the independent External Validation data file"),
             str(Path.cwd()),
-            "Data (*.xlsx *.xls *.csv)",
+            tr("Data ({patterns})", patterns="*.xlsx *.xls *.csv"),
         )
         if path:
             self.load_external_dataset(path)
@@ -1803,7 +2238,7 @@ class TrainingPage(QWidget):
             self.external_dataset_label.setText(path)
             self._refresh_external_mapping()
         except Exception as exc:
-            QMessageBox.critical(self, "外部資料載入失敗", str(exc))
+            QMessageBox.critical(self, tr("Could not load the external data"), str(exc))
 
     def _external_column_refs(self) -> tuple[ColumnRef, ...]:
         if self.external_bundle is None:
@@ -1823,7 +2258,7 @@ class TrainingPage(QWidget):
         self.external_mapping_tree.clear()
         self.external_mapping_boxes.clear()
         self.external_observation_combo.clear()
-        self.external_observation_combo.addItem("使用外部資料列位置", None)
+        self.external_observation_combo.addItem(tr("Use the external row position"), None)
         candidates = self._external_column_refs()
         for ref in candidates:
             self.external_observation_combo.addItem(ref.canonical_name, ref)
@@ -1845,7 +2280,7 @@ class TrainingPage(QWidget):
             item = QTreeWidgetItem((development, ""))
             self.external_mapping_tree.addTopLevelItem(item)
             combo = QComboBox()
-            combo.addItem("— 請選擇 —", None)
+            combo.addItem(tr("— select —"), None)
             for ref in candidates:
                 combo.addItem(ref.canonical_name, ref)
             suggested = previous.get(development) or by_canonical.get(development)
@@ -1879,14 +2314,19 @@ class TrainingPage(QWidget):
         }
         missing = sorted(required - mapping.keys())
         if missing:
-            raise ValueError("External mapping 尚未完成：" + "、".join(missing))
+            raise ValueError(
+                tr("External mapping is incomplete: {names}", names=", ".join(missing))
+            )
         return mapping, self.external_observation_combo.currentData()
 
     def load_dataset(self, path: str) -> None:
         try:
             self.bundle = FlexibleDatasetLoader().load(path)
+            self.dataset_path = path
             self.external_bundle = None
-            self.external_dataset_label.setText("尚未載入；只在 External Validation 策略使用")
+            self.external_dataset_label.setText(
+                tr("Not loaded; used by the External Validation strategy only")
+            )
             self._refresh_external_mapping()
             self.dataset_label.setText(path)
             self.legacy_specs = []
@@ -1897,14 +2337,20 @@ class TrainingPage(QWidget):
             self._populate_roles()
             rows = sum(sheet.profile.cleaned_rows for sheet in self.bundle.sheets.values())
             self.dataset_summary.setText(
-                f"已載入 {len(self.bundle.sheets)} 個 sheets / tables，共 {rows} 列。"
-                "請指定 Observation ID；若同一個體有重複量測，另指定 Group ID 以避免 split leakage。"
+                tr(
+                    "Loaded {sheets} sheet(s) / table(s), {rows:,} rows in total. Name an "
+                    "Observation ID; if one subject has repeated measurements, name a "
+                    "Group ID as well to prevent split leakage.",
+                    sheets=len(self.bundle.sheets),
+                    rows=rows,
+                )
             )
         except Exception as exc:
-            QMessageBox.critical(self, "資料載入失敗", str(exc))
+            QMessageBox.critical(self, tr("Could not load the data"), str(exc))
 
     def _populate_roles(self) -> None:
         assert self.bundle is not None
+        roles = role_options()
         self.role_tree.clear()
         self.sheet_role_boxes.clear()
         self.column_role_boxes.clear()
@@ -1916,18 +2362,25 @@ class TrainingPage(QWidget):
             self.role_tree.addTopLevelItem(parent)
             sheet_combo = QComboBox()
             for value in ("skip", "input", "combined_input", "output", "input_or_output"):
-                sheet_combo.addItem(ROLE_OPTIONS[value], value)
+                sheet_combo.addItem(roles[value], value)
             self.role_tree.setItemWidget(parent, 1, sheet_combo)
             self.sheet_role_boxes[sheet_name] = sheet_combo
             for column_name, column in profile.column_profiles.items():
-                child = QTreeWidgetItem((column_name, "", "數值" if column.trainable else "ID / 文字候選", str(profile.cleaned_rows), str(column.missing), f"unique={column.unique_values}; numeric={column.numeric_ratio:.1%}"))
+                child = QTreeWidgetItem((
+                    column_name,
+                    "",
+                    tr("numeric") if column.trainable else tr("ID / text candidate"),
+                    str(profile.cleaned_rows),
+                    str(column.missing),
+                    f"unique={column.unique_values}; numeric={column.numeric_ratio:.1%}",
+                ))
                 parent.addChild(child)
                 combo = QComboBox()
                 values = ["skip", "observation_id", "group_id"]
                 if column.trainable:
                     values[1:1] = ["input", "combined_input", "output", "input_or_output"]
                 for value in values:
-                    combo.addItem(ROLE_OPTIONS[value], value)
+                    combo.addItem(roles[value], value)
                 combo.currentIndexChanged.connect(lambda _index, s=sheet_name, c=column_name: self._column_role_changed(s, c))
                 self.role_tree.setItemWidget(child, 1, combo)
                 self.column_role_boxes[(sheet_name, column_name)] = combo
@@ -1953,13 +2406,20 @@ class TrainingPage(QWidget):
                 index = combo.findData("observation_id")
                 if index >= 0:
                     combo.setCurrentIndex(index)
-                    combo.setToolTip("V4 依欄名自動建議為 Observation ID；請確認，這一欄不會進入模型特徵。")
+                    combo.setToolTip(
+                        tr(
+                            "Suggested as the Observation ID from the column name — please "
+                            "confirm. This column never becomes a model feature."
+                        )
+                    )
                     suggested_observation = True
             elif not suggested_group and normalized in group_tokens:
                 index = combo.findData("group_id")
                 if index >= 0:
                     combo.setCurrentIndex(index)
-                    combo.setToolTip("V4 依欄名自動建議為 Group ID；請確認。")
+                    combo.setToolTip(
+                        tr("Suggested as the Group ID from the column name — please confirm.")
+                    )
                     suggested_group = True
 
     def _sheet_role_changed(self, sheet: str) -> None:
@@ -1990,7 +2450,7 @@ class TrainingPage(QWidget):
         self.legacy_specs = []
         self.catalog.replace(())
         self.table_model.refresh()
-        self.combo_label.setText("角色已變更，請重新產生組合")
+        self.combo_label.setText(tr("Roles changed — regenerate the combinations"))
 
     def _to_data_role(self, value: str) -> DataRole:
         return {
@@ -2032,7 +2492,9 @@ class TrainingPage(QWidget):
 
     def generate_preview(self) -> None:
         if self.bundle is None:
-            QMessageBox.warning(self, "尚未載入資料", "請先載入 CSV 或 Excel。")
+            QMessageBox.warning(
+                self, tr("No data loaded"), tr("Load a CSV or Excel file first.")
+            )
             return
         try:
             specs = generate_experiment_specs(self.collect_units(), self.bundle, max_combinations=0, min_valid_rows=8)
@@ -2053,9 +2515,13 @@ class TrainingPage(QWidget):
             self._update_selection_label()
             self._refresh_external_mapping()
             if not specs:
-                QMessageBox.warning(self, "沒有有效組合", "至少需要一組輸入與一組輸出。")
+                QMessageBox.warning(
+                self,
+                tr("No valid combination"),
+                tr("At least one input and one output are required."),
+            )
         except Exception as exc:
-            QMessageBox.critical(self, "組合產生失敗", str(exc))
+            QMessageBox.critical(self, tr("Could not generate combinations"), str(exc))
 
     def _set_selection(self, mode: str) -> None:
         self.table_model.set_all(mode)
@@ -2081,12 +2547,18 @@ class TrainingPage(QWidget):
         )
         confirmed = sum(record.structure_confirmed for record in self.catalog.selected_records)
         self.combo_label.setText(
-            f"已選 {len(self.catalog.selected_records):,} / {len(self.catalog.records):,} 組；"
-            f"結構已確認 {confirmed:,}"
+            tr(
+                "{selected:,} of {total:,} selected; {confirmed:,} structure(s) confirmed",
+                selected=len(self.catalog.selected_records),
+                total=len(self.catalog.records),
+                confirmed=confirmed,
+            )
         )
 
     def choose_output_folder(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "選擇輸出資料夾", self.output_edit.text())
+        path = QFileDialog.getExistingDirectory(
+            self, tr("Choose the output folder"), self.output_edit.text()
+        )
         if path:
             self.output_edit.setText(path)
 
@@ -2171,7 +2643,11 @@ class TrainingPage(QWidget):
 
     def start_training(self) -> None:
         if self.bundle is None:
-            QMessageBox.warning(self, "尚未載入資料", "請先載入資料並設定角色。")
+            QMessageBox.warning(
+                self,
+                tr("No data loaded"),
+                tr("Load the data and assign column roles first."),
+            )
             return
         if not self.legacy_specs:
             self.generate_preview()
@@ -2183,23 +2659,34 @@ class TrainingPage(QWidget):
                 jobs.append((spec, selected[record.stable_key]))
         models = [model_id for model_id, check in self.model_checks.items() if check.isEnabled() and check.isChecked()]
         if not jobs or not models:
-            QMessageBox.warning(self, "執行計畫為空", "請至少勾選一個資料組合與一個可用模型。")
+            QMessageBox.warning(
+                self,
+                tr("Nothing to run"),
+                tr("Tick at least one data combination and one available model."),
+            )
             return
         try:
             config = self.collect_config()
         except Exception as exc:
-            QMessageBox.warning(self, "設定不完整", str(exc))
+            QMessageBox.warning(self, tr("Incomplete settings"), str(exc))
             return
         external_mapping: dict[str, ColumnRef] = {}
         external_observation_ref: ColumnRef | None = None
         if config.strategy == EvaluationStrategy.EXTERNAL_VALIDATION:
             if self.external_bundle is None:
-                QMessageBox.warning(self, "尚需外部資料", "請載入獨立 External Validation 資料並完成欄位 mapping。")
+                QMessageBox.warning(
+                    self,
+                    tr("External data required"),
+                    tr(
+                        "Load the independent External Validation data and finish the "
+                        "column mapping."
+                    ),
+                )
                 return
             try:
                 external_mapping, external_observation_ref = self._collect_external_mapping(jobs)
             except Exception as exc:
-                QMessageBox.warning(self, "External mapping 不完整", str(exc))
+                QMessageBox.warning(self, tr("External mapping is incomplete"), str(exc))
                 return
         output_path = self._create_run_output_folder(self.output_edit.text())
         self.current_run_output_folder = output_path
@@ -2235,7 +2722,9 @@ class TrainingPage(QWidget):
     def cancel_training(self) -> None:
         if self.worker and self.worker.isRunning():
             self.worker.requestInterruption()
-            self.log_box.appendPlainText("已送出取消請求；目前 fold 完成後停止。")
+            self.log_box.appendPlainText(
+                tr("Cancellation requested; the run stops after the current fold.")
+            )
 
     def on_progress(self, current: int, total: int, label: str) -> None:
         self.progress.setValue(round(100 * current / max(1, total)))
@@ -2252,21 +2741,33 @@ class TrainingPage(QWidget):
         self.progress.setValue(100)
         self.run_completed.emit(str(self.current_run_output_folder or ""))
         if artifacts.pdf_path is not None:
-            self.current_run_label.setText(f"Training log — Completed — {artifacts.pdf_path}")
-            QMessageBox.information(self, "完成", f"Master report 已輸出：\n{artifacts.pdf_path}")
+            self.current_run_label.setText(
+                tr("Training log — completed — {path}", path=str(artifacts.pdf_path))
+            )
+            QMessageBox.information(
+                self,
+                tr("Finished"),
+                tr("Master report written to:\n{path}", path=str(artifacts.pdf_path)),
+            )
         else:
             error_path = getattr(artifacts, "rendering_error_path", None)
-            self.current_run_label.setText("Training log — Completed with PDF rendering error")
+            self.current_run_label.setText(
+                tr("Training log — completed, but the PDF could not be rendered")
+            )
             QMessageBox.warning(
                 self,
-                "訓練完成，但 PDF 產生失敗",
-                f"CSV、Markdown、PNG、模型與稽核檔均已保留。\n錯誤紀錄：{error_path}",
+                tr("Training finished, but the PDF failed"),
+                tr(
+                    "The CSV, Markdown, PNG, model and audit files are all intact.\n"
+                    "Error log: {path}",
+                    path=str(error_path),
+                ),
             )
 
     def on_failed(self, details: str) -> None:
         self._finish_worker()
         self.log_box.appendPlainText(details)
-        QMessageBox.critical(self, "執行失敗", details[-3000:])
+        QMessageBox.critical(self, tr("Run failed"), details[-3000:])
 
     def on_cancelled(self, message: str) -> None:
         self._finish_worker()
@@ -2277,11 +2778,64 @@ class TrainingPage(QWidget):
         self.cancel_button.setEnabled(False)
         self.worker = None
 
+    def retranslate(self) -> None:
+        """Rebuild the workspace in the new language.
+
+        The configuration tab builds several dozen labels and tooltips inline,
+        so rebuilding is both simpler and less error-prone than tracking every
+        widget. A loaded dataset is reloaded from its path afterwards; a run in
+        progress blocks the switch entirely, which the host window checks first.
+        """
+
+        dataset_path = self.dataset_path
+        output_folder = self.output_edit.text()
+        run_name = self.run_name_edit.text()
+
+        self.bundle = None
+        self.external_bundle = None
+        self.legacy_specs = []
+        self.catalog.replace(())
+        self.sheet_role_boxes.clear()
+        self.column_role_boxes.clear()
+        self.model_checks.clear()
+        self.scaler_checks.clear()
+        self.loss_checks.clear()
+        self.augmentation_checks.clear()
+        self.external_mapping_boxes.clear()
+        self.observation_ref = None
+        self.group_ref = None
+        self.setting_help_labels = []
+        self.setting_help_controls = []
+
+        previous = self.layout()
+        while previous.count():
+            item = previous.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+        # A widget may own only one layout, and deleteLater() would not detach
+        # the old one in time, so hand it to a throwaway parent instead.
+        QWidget().setLayout(previous)
+
+        self._build_ui()
+        self.output_edit.setText(output_folder)
+        self.run_name_edit.setText(run_name)
+        if dataset_path and Path(dataset_path).exists():
+            self.load_dataset(dataset_path)
+
+    def has_running_worker(self) -> bool:
+        return bool(self.worker and self.worker.isRunning())
+
     def can_close(self) -> bool:
         """Refuse to close while a Benchmark Run still owns a worker thread."""
 
         if self.worker and self.worker.isRunning():
-            QMessageBox.warning(self, "訓練進行中", "請先取消並等待目前 fold 結束。")
+            QMessageBox.warning(
+                self,
+                tr("A run is in progress"),
+                tr("Cancel it first and wait for the current fold to finish."),
+            )
             return False
         return True
 
@@ -2304,6 +2858,9 @@ class RegressionV4MainWindow(QMainWindow):
 
 
 def launch(argv: Sequence[str] | None = None) -> int:
+    import i18n
+
+    i18n.initialize()
     app = QApplication(list(argv or []))
     window = RegressionV4MainWindow()
     window.show()

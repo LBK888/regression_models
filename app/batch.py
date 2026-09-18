@@ -23,6 +23,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
+from i18n import tr
 from regression_core import DatasetBundle, FlexibleDatasetLoader
 from regression_v4.metrics import RegressionMetrics, calculate_regression_metrics
 
@@ -208,8 +209,11 @@ def run_batch(
             row_labels=(),
             predictions=np.empty((0, len(target_names))),
             total_rows=len(frame),
-            error=f"尚未對應 {len(missing)} 個輸入欄位：{'、'.join(missing[:6])}"
-            + ("…" if len(missing) > 6 else ""),
+            error=tr(
+                "{count} input column(s) are still unmapped: {names}",
+                count=len(missing),
+                names=", ".join(missing[:6]) + ("…" if len(missing) > 6 else ""),
+            ),
         )
 
     feature_columns = [str(feature_mapping[name]) for name in feature_names]
@@ -222,7 +226,9 @@ def run_batch(
             row_labels=(),
             predictions=np.empty((0, len(target_names))),
             total_rows=len(frame),
-            error=f"資料表沒有這些欄位：{'、'.join(absent[:6])}",
+            error=tr(
+                "The table has no such column(s): {names}", names=", ".join(absent[:6])
+            ),
         )
 
     features = _numeric_matrix(frame, feature_columns)
@@ -245,7 +251,10 @@ def run_batch(
         truth = truth_all
     elif resolved_targets:
         notes.append(
-            "只對應到部分 ground truth 欄位，因此這次只輸出預測值，不進行驗證。"
+            tr(
+                "Only some ground-truth columns are mapped, so this run produces "
+                "predictions without validation."
+            )
         )
 
     if not valid.any():
@@ -258,7 +267,10 @@ def run_batch(
             total_rows=len(frame),
             dropped_missing_features=dropped_features,
             dropped_missing_targets=dropped_targets,
-            error="沒有任何一列同時具備完整的輸入值（以及 ground truth，若有選取）。",
+            error=tr(
+                "No row has a complete set of input values (and ground truth, "
+                "where it was mapped)."
+            ),
         )
 
     usable = frame.loc[valid]
@@ -279,24 +291,42 @@ def run_batch(
             total_rows=len(frame),
             dropped_missing_features=dropped_features,
             dropped_missing_targets=dropped_targets,
-            error=f"推論失敗：{type(exc).__name__}: {exc}",
+            error=tr(
+                "Inference failed: {error_type}: {error}",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            ),
         )
 
     metrics: RegressionMetrics | None = None
     selected_truth = truth[valid] if truth is not None else None
     if selected_truth is not None:
         if len(selected_truth) < 2:
-            notes.append("驗證需要至少兩列 ground truth，R² 無法計算。")
+            notes.append(
+                tr("Validation needs at least two ground-truth rows; R² cannot be computed.")
+            )
         else:
             try:
                 metrics = calculate_regression_metrics(selected_truth, predictions, target_names)
             except Exception as exc:
-                notes.append(f"指標計算失敗：{exc}")
+                notes.append(tr("Metric calculation failed: {error}", error=str(exc)))
 
     if dropped_features:
-        notes.append(f"{dropped_features} 列因輸入值缺失或非數值而略過。")
+        notes.append(
+            tr(
+                "{count} row(s) were skipped because an input value was missing or "
+                "not numeric.",
+                count=dropped_features,
+            )
+        )
     if dropped_targets:
-        notes.append(f"{dropped_targets} 列因 ground truth 缺失而未納入驗證。")
+        notes.append(
+            tr(
+                "{count} row(s) were left out of the validation because ground truth "
+                "was missing.",
+                count=dropped_targets,
+            )
+        )
 
     return BatchResult(
         model_label=model_label,
