@@ -13,11 +13,11 @@ PyQt6
 # extra model families to the benchmark; the application is complete without
 # them. Uncomment a line and re-run install.bat to activate that adapter — it
 # then appears as selectable in the training tab.
-# catboost              # CatBoost gradient boosting
-# xgboost               # XGBoost gradient boosting
-# lightgbm              # LightGBM gradient boosting
-# tabm                  # TabM parameter-efficient ensemble
-# pytabkit              # RealMLP tabular MLP
+catboost              # CatBoost gradient boosting
+xgboost               # XGBoost gradient boosting
+lightgbm              # LightGBM gradient boosting
+tabm                  # TabM parameter-efficient ensemble
+pytabkit              # RealMLP tabular MLP
 #
 # TabPFN is deliberately absent: its weights require account registration and
 # an interactive login before first use, which does not fit an offline desktop
