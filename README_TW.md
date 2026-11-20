@@ -13,9 +13,10 @@ English documentation: [README.md](README.md)
 
 ## Windows 執行檔（不需安裝 Python）
 
-到 [Releases 頁面](https://github.com/LBK888/regression_models/releases) 下載最新版本的
-**全部分割檔**（`RegressionModels-v…-win64-cuda12.8.7z.001`、`.002` …），用
-[7-Zip](https://www.7-zip.org) 解壓縮 `.001`，再執行 `RegressionModels.exe`。
+到 [Releases 頁面](https://github.com/LBK888/regression_models/releases) 下載
+`RegressionModels-v…-win64-cuda12.8.7z`，用 [7-Zip](https://www.7-zip.org) 解壓縮，
+再執行 `RegressionModels.exe`。若該版本分成多個分割檔（`.7z.001`、`.002` …），
+請全部下載並對 `.001` 解壓縮。
 
 啟動時程式會：
 

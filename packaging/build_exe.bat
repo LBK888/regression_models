@@ -46,8 +46,15 @@ if not exist "%SEVENZIP%" (
     goto :done
 )
 if not exist release mkdir release
-del /q "%ARCHIVE%.*" 2>nul
-"%SEVENZIP%" a -t7z -mx=7 -mmt=on -v1900m "%ARCHIVE%" .\dist\RegressionModels || goto :fail
+if exist "%ARCHIVE%*" (
+    echo       %ARCHIVE% already exists - delete it first or raise APP_VERSION.
+    goto :fail
+)
+pushd dist
+"%SEVENZIP%" a -t7z -mx=7 -mmt=on -v1900m "..\%ARCHIVE%" RegressionModels || (popd & goto :fail)
+popd
+REM A single volume is an ordinary .7z: drop the .001 suffix so users get one plain file.
+if exist "%ARCHIVE%.001" if not exist "%ARCHIVE%.002" move /y "%ARCHIVE%.001" "%ARCHIVE%" >nul
 
 :done
 echo.

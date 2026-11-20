@@ -14,10 +14,10 @@ English is the default. 中文說明請見 [README_TW.md](README_TW.md)。
 
 ## Windows exe (no Python needed)
 
-Download every part of the latest release from the
-[Releases page](https://github.com/LBK888/regression_models/releases)
-(`RegressionModels-v…-win64-cuda12.8.7z.001`, `.002`, …), extract `.001` with
-[7-Zip](https://www.7-zip.org), and run `RegressionModels.exe`.
+Download `RegressionModels-v…-win64-cuda12.8.7z` from the
+[Releases page](https://github.com/LBK888/regression_models/releases), extract it with
+[7-Zip](https://www.7-zip.org), and run `RegressionModels.exe`. If a release is split into
+`.7z.001`, `.002`, …, download every part and open `.001`.
 
 At start the program:
 

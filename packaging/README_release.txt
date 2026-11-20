@@ -2,9 +2,10 @@ Regression Models — Windows 版（CUDA 12.8）
 =============================================
 
 【安裝】
-1. 下載同一版本的全部分割檔（.7z.001、.7z.002 …），放在同一個資料夾。
-2. 用 7-Zip 對 .7z.001 按右鍵 →「解壓縮至…」，會自動合併所有分割檔。
-   （Windows 內建的解壓縮不支援分割 7z 檔，請安裝 7-Zip：https://www.7-zip.org）
+1. 下載 RegressionModels-v…-win64-cuda12.8.7z。若該版本分成多個分割檔
+   （.7z.001、.7z.002 …），請全部下載到同一個資料夾。
+2. 用 7-Zip（https://www.7-zip.org）按右鍵 →「解壓縮至…」；分割檔請對 .7z.001 操作，
+   會自動合併。
 3. 執行資料夾中的 RegressionModels.exe。
    第一次執行若出現「Windows 已保護您的電腦」，請按「其他資訊」→「仍要執行」
    （本程式沒有數位簽章）。
@@ -38,9 +39,9 @@ Regression Models — Windows 版（CUDA 12.8）
 Regression Models — Windows build (CUDA 12.8)
 =============================================
 
-Install: download every part (.7z.001, .7z.002, ...) into one folder, right-click
-.7z.001 in 7-Zip and extract (Windows' built-in extractor cannot open split 7z
-archives). Run RegressionModels.exe. If SmartScreen appears, choose
+Install: download RegressionModels-v...-win64-cuda12.8.7z (if a release is split
+into .7z.001, .7z.002, ..., download every part into one folder and open .001),
+extract it with 7-Zip and run RegressionModels.exe. If SmartScreen appears, choose
 "More info" -> "Run anyway" (the program is not code-signed).
 
 At start the program checks that CUDA really works (a test calculation on the
