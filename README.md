@@ -12,6 +12,27 @@ English is the default. 中文說明請見 [README_TW.md](README_TW.md)。
 
 ---
 
+## Windows exe (no Python needed)
+
+Download every part of the latest release from the
+[Releases page](https://github.com/LBK888/regression_models/releases)
+(`RegressionModels-v…-win64-cuda12.8.7z.001`, `.002`, …), extract `.001` with
+[7-Zip](https://www.7-zip.org), and run `RegressionModels.exe`.
+
+At start the program:
+
+- **checks that CUDA really works** by running a test calculation on the GPU, and explains
+  why when it does not (no NVIDIA driver, driver too old, card unsupported by the CUDA 12.8
+  build) before falling back to the CPU — every model still works on the CPU;
+- **creates any missing folder or setting** (`runs`, `models`, `reports`, `pretrained`, `logs`,
+  `settings.json`) and installs the example models on first start;
+- **offers to download the TabPFN v2 weights** (about 45 MB, no account) if they are missing.
+
+The start-up report is written to `logs/startup.json`; `RegressionModels.exe --check` runs the
+checks alone. To build the exe yourself, run `packaginguild_exe.bat` (see the comments in it).
+
+---
+
 ## Install
 
 ```bat

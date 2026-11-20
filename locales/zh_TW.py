@@ -1136,4 +1136,42 @@ MESSAGES = {
     "exactly {value:.4g} × {other} — the same information": "恰好是 {value:.4g} × {other}——資訊完全相同",
     "ρ = {value:.2f} with {other} — nearly the same information": "與 {other} 的 ρ = {value:.2f}——資訊幾乎相同",
     "⚠ {count} data check(s) flagged in the Audit column.": "⚠ 稽核欄標出 {count} 項資料檢查。",
+    # ------------------------------------------------------------------
+    # 啟動檢查
+    # ------------------------------------------------------------------
+    "Start-up check: {gpu}; {workspace}": "啟動檢查：{gpu}；{workspace}",
+    "GPU ready: {name}": "GPU 可用：{name}",
+    "CPU mode (GPU disabled by REGRESSION_FORCE_CPU)": "CPU 模式（已用 REGRESSION_FORCE_CPU 停用 GPU）",
+    "CPU mode — no usable GPU": "CPU 模式——沒有可用的 GPU",
+    "The program runs on the CPU instead. Neural networks and TabPFN train more slowly; every other model is unaffected.":
+        "程式會改用 CPU 執行。神經網路與 TabPFN 會訓練得比較慢，其他模型不受影響。",
+    "An NVIDIA driver is installed, but this copy of the program contains the CPU-only PyTorch build ({torch}), so it cannot use the GPU. Use the CUDA release, or run install.bat for a source installation.":
+        "已安裝 NVIDIA 驅動程式，但這份程式內含的是 CPU 版 PyTorch（{torch}），無法使用 GPU。請改用 CUDA 版發行檔；若是原始碼安裝，請執行 install.bat。",
+    "This copy of the program contains the CPU-only PyTorch build.": "這份程式內含的是 CPU 版 PyTorch。",
+    "No NVIDIA graphics driver was found. If this computer has an NVIDIA card, install the latest driver from nvidia.com and restart the program.":
+        "找不到 NVIDIA 顯示卡驅動程式。如果這台電腦有 NVIDIA 顯示卡，請到 nvidia.com 安裝最新驅動程式後重新啟動程式。",
+    "An NVIDIA driver is installed, but CUDA {cuda} cannot start on it. Update the NVIDIA driver to the latest version and restart the program.":
+        "已安裝 NVIDIA 驅動程式，但 CUDA {cuda} 無法在上面啟動。請將 NVIDIA 驅動程式更新到最新版後重新啟動程式。",
+    "The GPU {name} was found, but a test calculation failed: {detail}. The card may be too old or too new for this CUDA {cuda} build, or the driver may be outdated.":
+        "偵測到 GPU {name}，但測試運算失敗：{detail}。可能是顯示卡對這個 CUDA {cuda} 版本來說太舊或太新，或驅動程式版本過舊。",
+    "No usable GPU": "沒有可用的 GPU",
+    "CUDA GPU acceleration is not available.": "無法使用 CUDA GPU 加速。",
+    "Don't show this again": "不要再顯示",
+    "TabPFN weights missing": "缺少 TabPFN 權重",
+    "Download the TabPFN v2 weights now (about 45 MB, no account needed)?": "要現在下載 TabPFN v2 權重嗎？（約 45 MB，不需註冊帳號）",
+    "They are saved to {path}. Without them TabPFN downloads them the first time it is used, which fails on an offline computer.":
+        "會存到 {path}。沒有預先下載的話，TabPFN 會在第一次使用時才下載，離線電腦上就會失敗。",
+    "Don't ask again": "不要再詢問",
+    "Downloading the TabPFN v2 weights…": "正在下載 TabPFN v2 權重…",
+    "Downloading the TabPFN v2 weights… {done:.1f} MB": "正在下載 TabPFN v2 權重… {done:.1f} MB",
+    "TabPFN weights": "TabPFN 權重",
+    "Saved to {path}.": "已儲存到 {path}。",
+    "The download failed: {error}\n\nOn an offline computer, copy tabpfn-v2-regressor.ckpt into {folder} by hand.":
+        "下載失敗：{error}\n\n離線電腦請手動把 tabpfn-v2-regressor.ckpt 複製到 {folder}。",
+    "created folders: {names}": "已建立資料夾：{names}",
+    "created settings.json": "已建立 settings.json",
+    "installed example models: {names}": "已安裝範例模型：{names}",
+    "TabPFN weights ready": "TabPFN 權重已就緒",
+    "Download": "下載",
+    "Not now": "暫不下載",
 }

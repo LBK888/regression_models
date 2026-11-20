@@ -11,6 +11,25 @@ English documentation: [README.md](README.md)
 
 ---
 
+## Windows 執行檔（不需安裝 Python）
+
+到 [Releases 頁面](https://github.com/LBK888/regression_models/releases) 下載最新版本的
+**全部分割檔**（`RegressionModels-v…-win64-cuda12.8.7z.001`、`.002` …），用
+[7-Zip](https://www.7-zip.org) 解壓縮 `.001`，再執行 `RegressionModels.exe`。
+
+啟動時程式會：
+
+- **確認 CUDA 真的可用**：實際在 GPU 上做一次測試運算；不能用時會說明原因（沒有 NVIDIA 驅動、
+  驅動太舊、顯示卡不支援 CUDA 12.8 版本），並改用 CPU 執行——所有模型在 CPU 上都能用；
+- **補齊缺少的資料夾與設定**（`runs`、`models`、`reports`、`pretrained`、`logs`、`settings.json`），
+  並在第一次啟動時安裝範例模型；
+- **缺少 TabPFN v2 權重時詢問是否下載**（約 45 MB，不需註冊帳號）。
+
+啟動檢查結果寫在 `logs/startup.json`；`RegressionModels.exe --check` 可以只執行檢查。
+要自己建置執行檔，請執行 `packaginguild_exe.bat`（說明見檔案內註解）。
+
+---
+
 ## 安裝
 
 ```bat

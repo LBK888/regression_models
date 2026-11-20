@@ -74,6 +74,25 @@ def adaptive_min_samples_leaf(n_rows: int | None) -> int:
     return int(max(2, min(50, round((float(n_rows) ** 0.5) / 6.0))))
 
 
+BOOSTING_SINGLE_THREAD_ROWS = 2000
+
+
+def boosting_threads(n_rows: int | None) -> int:
+    """Thread count for XGBoost and LightGBM.
+
+    Their OpenMP loops synchronise at every split. On a few hundred rows that
+    overhead dominates, and on a machine where other jobs keep the cores busy an
+    all-core fit was measured at 264 s against 0.15 s single-threaded (48 rows,
+    300 trees). Small tables therefore use one thread, larger ones at most 8.
+    """
+
+    import os
+
+    if not n_rows or n_rows < BOOSTING_SINGLE_THREAD_ROWS:
+        return 1
+    return max(1, min(8, (os.cpu_count() or 2) // 2))
+
+
 def infer_feature_groups(input_columns: tuple[str, ...]) -> tuple[tuple[int, ...], ...]:
     grouped: dict[str, list[int]] = {}
     for index, column in enumerate(input_columns):
@@ -1076,6 +1095,10 @@ def create_model(
             model.embedding_dim = max(8, round(16 * scale))
         if adaptive and isinstance(model, (RandomForestRegressor, ExtraTreesRegressor)):
             model.set_params(min_samples_leaf=adaptive_min_samples_leaf(capacity_rows))
+        if model_id in {"xgboost", "lightgbm"}:
+            available = model.get_params(deep=True)
+            key = "n_jobs" if "n_jobs" in available else "estimator__n_jobs"
+            model.set_params(**{key: boosting_threads(capacity_rows)})
         if isinstance(model, (RealMLPRegressorAdapter, ModernNCARegressor)) and training_options:
             for source, destination in (
                 ("epochs", "epochs"),

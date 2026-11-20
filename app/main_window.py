@@ -14,6 +14,7 @@ from typing import Sequence
 
 import torch
 
+from PyQt6.QtCore import QTimer
 from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtWidgets import (
     QApplication,
@@ -34,6 +35,10 @@ from regression_v4.ui import TrainingPage
 from .batch_page import BatchPage
 from .inference_page import InferencePage
 from .library_page import LibraryPage
+from startup_checks import GpuReport, WorkspaceReport
+from version import APP_VERSION
+
+from .startup import gpu_summary, offer_tabpfn_download, show_gpu_warning, workspace_summary
 from .theme import C, apply_theme
 from .wheel_guard import install_wheel_guard
 
@@ -85,7 +90,7 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle(
             tr("Regression Models — training, model library and inference")
-            + f"　[{tr(EXECUTION_MODE_LABEL)}]"
+            + f"  v{APP_VERSION}　[{tr(EXECUTION_MODE_LABEL)}]"
         )
         self.tabs.setTabText(0, tr("① Training and hyperparameter search"))
         self.tabs.setTabText(1, tr("② Model library"))
@@ -149,6 +154,14 @@ class MainWindow(QMainWindow):
             tr("Models available for inference: {count}", count=len(entries)), 5000
         )
 
+    def show_startup_report(self, gpu: GpuReport, workspace: WorkspaceReport) -> None:
+        self.statusBar().showMessage(
+            tr("Start-up check: {gpu}; {workspace}", gpu=gpu_summary(gpu), workspace=workspace_summary(workspace)),
+            20000,
+        )
+        show_gpu_warning(self, gpu)
+        offer_tabpfn_download(self, workspace)
+
     def closeEvent(self, event: QCloseEvent) -> None:
         if not self.training_page.can_close():
             event.ignore()
@@ -159,11 +172,20 @@ class MainWindow(QMainWindow):
         event.accept()
 
 
-def launch(argv: Sequence[str] | None = None) -> int:
+def launch(
+    argv: Sequence[str] | None = None,
+    *,
+    gpu_report: GpuReport | None = None,
+    workspace_report: WorkspaceReport | None = None,
+) -> int:
     i18n.initialize()
     app = QApplication(list(argv if argv is not None else sys.argv))
     apply_theme(app)
     install_wheel_guard(app)
     window = MainWindow()
     window.show()
+    if gpu_report is not None and workspace_report is not None:
+        # After the window is on screen, so the dialogs have a parent and the
+        # program never looks frozen while a message waits for an answer.
+        QTimer.singleShot(0, lambda: window.show_startup_report(gpu_report, workspace_report))
     return app.exec()

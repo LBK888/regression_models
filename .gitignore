@@ -24,3 +24,11 @@ settings.json
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Packaged-exe build: build environment, PyInstaller work folders and the
+# release archives. Start-up and crash logs are per machine.
+.venv-build/
+build/
+dist/
+release/
+logs/
