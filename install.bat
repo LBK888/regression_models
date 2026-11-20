@@ -5,8 +5,12 @@ cd /d "%~dp0"
 
 REM ===================== configurable =====================
 set "VENV_DIR=.venv"
+REM Install into another folder instead, e.g. to test the installer without
+REM touching .venv:  set REGRESSION_VENV_DIR=.venv-test  before running.
+if defined REGRESSION_VENV_DIR set "VENV_DIR=%REGRESSION_VENV_DIR%"
 set "REQ_FILE=requirements.txt"
 REM Pin a version here for reproducibility, e.g. set "TORCH_SPEC=torch==2.11.0"
+REM (the version must exist on the CUDA index that gets selected).
 set "TORCH_SPEC=torch"
 REM Force a specific interpreter if auto-detection picks a bad one,
 REM e.g. set "PY_OVERRIDE=py -3.12"   (leave empty for auto-detect)
@@ -67,79 +71,52 @@ echo [3/6] Upgrading pip / setuptools / wheel...
 if errorlevel 1 goto :err_pip
 echo.
 
-REM --------------------------------------------------- [4/6] requirements
-echo [4/6] Installing project dependencies from %REQ_FILE%...
-if not exist "%REQ_FILE%" goto :err_no_req
-"%VENV_PY%" -m pip install -r "%REQ_FILE%"
-if errorlevel 1 goto :err_req
+REM ------------------------------------------------- [4/6] PyTorch build
+REM PyTorch comes first. PyPI only has CPU-only torch for Windows, so if the
+REM requirements went first, tabpfn / lightning would pull that CPU build in and
+REM the CUDA install afterwards would find torch "already satisfied".
+echo [4/6] Choosing the PyTorch build for this machine...
+if not exist "tools\select_torch_build.py" goto :err_no_selector
+set "TORCH_DONE="
+set "TORCH_LABEL="
+set "TORCH_TAG="
+for /f "usebackq tokens=1-4 delims=|" %%a in (`call "%VENV_PY%" tools\select_torch_build.py`) do (
+    if not defined TORCH_DONE call :try_torch "%%a" "%%b" "%%c" "%%d"
+)
+if not defined TORCH_DONE goto :err_torch
+echo       PyTorch: %TORCH_LABEL%
 echo.
 
-REM -------------------------------------------- [5/6] CUDA detect + torch
-echo [5/6] Detecting CUDA and installing PyTorch...
-set "CUDA_VER="
-set "CU_MAJ=0"
-set "CU_MIN=0"
-
-where nvidia-smi >nul 2>&1
-if errorlevel 1 goto :torch_cpu
-
-for /f "tokens=3 delims=:" %%a in ('nvidia-smi 2^>nul ^| findstr /C:"CUDA Version"') do (
-    for /f "tokens=1 delims= " %%b in ("%%a") do set "CUDA_VER=%%b"
-)
-if not defined CUDA_VER goto :torch_cpu
-
-for /f "tokens=1,2 delims=." %%m in ("!CUDA_VER!") do (
-    set "CU_MAJ=%%m"
-    set "CU_MIN=%%n"
-)
-if not defined CU_MIN set "CU_MIN=0"
-echo       NVIDIA driver reports CUDA !CUDA_VER!
-
-if !CU_MAJ! GEQ 13 goto :torch_cu130
-if !CU_MAJ! EQU 12 goto :torch_cuda12
-if !CU_MAJ! EQU 11 goto :torch_cu118
-goto :torch_cpu
-
-:torch_cuda12
-if !CU_MIN! GEQ 8 goto :torch_cu128
-goto :torch_cu126
-
-:torch_cu130
-set "TORCH_INDEX=https://download.pytorch.org/whl/cu130"
-set "TORCH_LABEL=CUDA 13.0 build"
-goto :torch_install
-
-:torch_cu128
-set "TORCH_INDEX=https://download.pytorch.org/whl/cu128"
-set "TORCH_LABEL=CUDA 12.8 build"
-goto :torch_install
-
-:torch_cu126
-set "TORCH_INDEX=https://download.pytorch.org/whl/cu126"
-set "TORCH_LABEL=CUDA 12.6 build"
-goto :torch_install
-
-:torch_cu118
-set "TORCH_INDEX=https://download.pytorch.org/whl/cu118"
-set "TORCH_LABEL=CUDA 11.8 build"
-goto :torch_install
-
-:torch_cpu
-set "TORCH_INDEX=https://download.pytorch.org/whl/cpu"
-set "TORCH_LABEL=CPU-only build"
-echo       No usable NVIDIA CUDA runtime detected.
-
-:torch_install
-echo       Installing PyTorch: %TORCH_LABEL%
-echo       Index: %TORCH_INDEX%
-"%VENV_PY%" -m pip install %TORCH_SPEC% --index-url %TORCH_INDEX%
-if errorlevel 1 goto :err_torch
+REM --------------------------------------------------- [5/6] requirements
+echo [5/6] Installing project dependencies from %REQ_FILE%...
+if not exist "%REQ_FILE%" goto :err_no_req
+set "TORCH_PIN="
+for /f "usebackq delims=" %%v in (`call "%VENV_PY%" -c "import torch; print(torch.__version__)"`) do set "TORCH_PIN=%%v"
+if not defined TORCH_PIN goto :err_verify
+REM Pin the exact torch just installed: a package that asked for another torch
+REM would otherwise replace the CUDA build with PyPI's CPU-only one.
+set "TORCH_CONSTRAINT=%TEMP%\regression_models_torch_pin.txt"
+> "%TORCH_CONSTRAINT%" echo torch==%TORCH_PIN%
+"%VENV_PY%" -m pip install -r "%REQ_FILE%" -c "%TORCH_CONSTRAINT%"
+if errorlevel 1 goto :err_req
 echo.
 
 REM ------------------------------------------------- [6/6] verify + folders
 echo [6/6] Verifying the installation...
 "%VENV_PY%" -c "import numpy, pandas, scipy, sklearn, matplotlib, joblib, openpyxl, PyQt6.QtWidgets, torch; print('  numpy        ', numpy.__version__); print('  pandas       ', pandas.__version__); print('  scikit-learn ', sklearn.__version__); print('  matplotlib   ', matplotlib.__version__); print('  PyQt6        ', 'ok'); print('  torch        ', torch.__version__); print('  CUDA available', torch.cuda.is_available()); print('  GPU          ', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'n/a')"
 if errorlevel 1 goto :err_verify
+if /i "%TORCH_TAG%"=="cpu" goto :verify_selftest
+REM is_available() is not enough: run a real calculation on the GPU.
+"%VENV_PY%" -c "import torch; x = torch.randn(256, 256, device='cuda'); y = (x @ x).sum().item(); torch.cuda.synchronize(); print('  GPU test      ok -', torch.cuda.get_device_name(0))"
+if errorlevel 1 goto :warn_gpu
+goto :verify_selftest
+
+:warn_gpu
+echo       [WARN] The %TORCH_LABEL% is installed but a test calculation on the GPU failed.
+echo              Update the NVIDIA driver to the latest version. Until then the
+echo              program runs on the CPU and tells you why at start-up.
+
+:verify_selftest
 
 echo.
 echo       Running the application self-test...
@@ -205,14 +182,23 @@ exit /b 1
 :err_req
 echo.
 echo [ERROR] Dependency installation failed. Check your network connection or %REQ_FILE%.
+echo         If pip reports a conflict with torch==%TORCH_PIN%, a package needs a
+echo         different PyTorch version: pin one in TORCH_SPEC at the top of install.bat.
 echo         Tip: brand-new Python releases often have no wheels yet - set
 echo              PY_OVERRIDE at the top of install.bat to an older 3.1x and retry.
 pause
 exit /b 1
 
+:err_no_selector
+echo.
+echo [ERROR] tools\select_torch_build.py is missing next to install.bat.
+echo         Copy the whole project folder, including the tools folder.
+pause
+exit /b 1
+
 :err_torch
 echo.
-echo [ERROR] PyTorch installation failed (%TORCH_LABEL%).
+echo [ERROR] PyTorch installation failed - not even the CPU build could be installed.
 echo         The build may not exist for this Python version, or the download failed.
 echo         Check https://pytorch.org/get-started/locally/ for a matching command.
 echo         Tip: brand-new Python releases often have no wheels yet - set
@@ -235,6 +221,46 @@ pause
 exit /b 1
 
 REM ============================ subroutines ============================
+REM One PyTorch candidate from tools\select_torch_build.py:
+REM   %1 = CUDA tag of the build ("13.0", "12.8", ... or "cpu"), %2 = index URL,
+REM   %3 = label, %4 = why it was chosen. Sets TORCH_DONE when torch is in place.
+:try_torch
+set "CAND_TAG=%~1"
+set "CAND_INDEX=%~2"
+set "CAND_LABEL=%~3"
+echo       Candidate: %~3 - %~4
+set "HAVE_TAG=none"
+for /f "usebackq delims=" %%t in (`call "%VENV_PY%" -c "import torch; print(torch.version.cuda or 'cpu')" 2^>nul`) do set "HAVE_TAG=%%t"
+if /i "%HAVE_TAG%"=="%CAND_TAG%" goto :torch_keep
+if /i "%CAND_TAG%"=="cpu" if /i not "%HAVE_TAG%"=="none" goto :torch_keep_cuda
+if /i "%HAVE_TAG%"=="none" goto :torch_fetch
+echo       Replacing the installed PyTorch [%HAVE_TAG%] with the %CAND_LABEL%...
+"%VENV_PY%" -m pip uninstall -y torch
+
+:torch_fetch
+"%VENV_PY%" -m pip install %TORCH_SPEC% --index-url %CAND_INDEX%
+if errorlevel 1 goto :torch_next
+goto :torch_ok
+
+:torch_next
+echo       [WARN] The %CAND_LABEL% is not available for this Python - trying the next option.
+goto :eof
+
+:torch_keep_cuda
+echo       Keeping the installed PyTorch [CUDA %HAVE_TAG%]; it also runs on the CPU.
+set "CAND_LABEL=CUDA %HAVE_TAG% build"
+set "CAND_TAG=%HAVE_TAG%"
+goto :torch_ok
+
+:torch_keep
+echo       The %CAND_LABEL% is already installed - keeping it.
+
+:torch_ok
+set "TORCH_DONE=1"
+set "TORCH_LABEL=%CAND_LABEL%"
+set "TORCH_TAG=%CAND_TAG%"
+goto :eof
+
 :probe_python
 if defined PY_CMD goto :eof
 %~1 -c "import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)" >nul 2>&1

@@ -43,10 +43,15 @@ install.bat
 
 1. find a Python 3.11+ interpreter (and say exactly what to install if there is none)
 2. create the `.venv` virtual environment
-3. install the dependencies from `requirements.txt`
-4. detect the CUDA version with `nvidia-smi` and install the matching PyTorch build
-   (CUDA 13.0 / 12.8 / 12.6 / 11.8, or CPU-only)
-5. verify every import and run the engine self-test
+3. read the NVIDIA driver's CUDA version and the GPU's compute capability, and install the
+   newest PyTorch build that suits both (CUDA 13.0 / 12.8 / 12.6 / 11.8, or CPU-only),
+   falling back to the next one when a build does not exist for this Python. A CPU-only
+   build left in an existing `.venv` is replaced; a matching build is kept
+4. install the dependencies from `requirements.txt`, pinned to that PyTorch build so no
+   package can swap it for PyPI's CPU-only one
+5. verify every import, run a test calculation on the GPU, and run the engine self-test
+
+Running `install.bat` again on an existing `.venv` is safe: it only changes what is wrong.
 
 ## Run
 

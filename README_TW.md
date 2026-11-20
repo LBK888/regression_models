@@ -41,10 +41,13 @@ install.bat
 
 1. 尋找 Python 3.11 以上的直譯器（找不到會明確說明該安裝什麼）
 2. 建立 `.venv` 虛擬環境
-3. 依 `requirements.txt` 安裝相依套件
-4. 用 `nvidia-smi` 偵測 CUDA 版本，安裝對應的 PyTorch build
-   （CUDA 13.0 / 12.8 / 12.6 / 11.8，或 CPU 版）
-5. 驗證所有套件可匯入，並執行引擎 self-test
+3. 讀取 NVIDIA 驅動支援的 CUDA 版本與顯示卡的 compute capability，安裝兩者都適用的最新
+   PyTorch build（CUDA 13.0 / 12.8 / 12.6 / 11.8，或 CPU 版）；某個 build 沒有這個 Python 版本
+   時自動改用下一個。既有 `.venv` 裡的 CPU 版會被換掉，版本正確則保留
+4. 依 `requirements.txt` 安裝相依套件，並鎖定剛裝好的 PyTorch，避免被其他套件換成 PyPI 的 CPU 版
+5. 驗證所有套件可匯入、在 GPU 上實際做一次測試運算，並執行引擎 self-test
+
+對既有的 `.venv` 重新執行 `install.bat` 是安全的：只會修正有問題的部分。
 
 ## 啟動
 
