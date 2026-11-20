@@ -939,4 +939,201 @@ MESSAGES = {
     "Macro NMAE (lower is better)": "Macro NMAE（越低越好）",
     "Reported R² (higher is better)": "Reported R²（越高越好）",
     "MAPE % (descriptive only)": "MAPE %（僅供描述）",
+    # ------------------------------------------------------------------
+    # 訓練設定頁（重新設計版）
+    # ------------------------------------------------------------------
+    "Drop a CSV / Excel file here": "將 CSV / Excel 檔拖曳到這裡",
+    "Confirm structure": "確認結構",
+    "1 · How to measure accuracy": "1 · 如何評估準確度",
+    "Cross-validation (recommended)": "交叉驗證（建議）",
+    "One train / test split": "單次訓練 / 測試切分",
+    "Score on a separate data file": "用另一份獨立資料檔評分",
+    "Train only, no score": "只訓練，不評分",
+    "Every row is predicted once by a model that never saw it. The most reliable score for small data sets.":
+        "每一筆資料都會被「沒看過它」的模型預測一次。小資料最可靠的評分方式。",
+    "Sets part of the data aside once and scores the models on it. Quick, but on small data the score depends a lot on which rows were picked.":
+        "保留一部分資料做一次測試。速度快，但在小資料上，分數很受「剛好抽到哪幾筆」影響。",
+    "Picks the best model by cross-validation on this data, then scores it once on a second, independent data file.":
+        "先在這份資料上用交叉驗證挑出最佳模型，再用另一份獨立的資料檔做一次最終評分。",
+    "Fits the models on every row and saves them without any score, so nothing tells you whether they actually work.":
+        "用全部資料訓練並儲存模型，不做任何評分——因此無從得知模型實際上是否有效。",
+    "Use the most recent rows as the test set": "用最新的資料列當測試集",
+    "Retrain the kept models on all rows before saving": "儲存前，以全部資料重新訓練保留的模型",
+    "Double-check the best candidates with nested cross-validation (slow)":
+        "以巢狀交叉驗證複核最佳候選（較慢）",
+    "Folds (K)": "折數（K）",
+    "The data is cut into K parts; each part is predicted once by a model trained on the other K−1 parts. 5 is a good default. With a Group ID, K cannot exceed the number of groups.":
+        "資料切成 K 份，每一份輪流由其餘 K−1 份訓練出的模型預測。預設 5 即可。設定 Group ID 時，K 不能超過群組數。",
+    "Test share": "測試比例",
+    "The share of rows (or of groups) set aside for scoring. At 0 % every row is used for training and no score is produced.":
+        "保留下來評分的資料（或群組）比例。設為 0 % 時全部資料都拿去訓練，不會產生分數。",
+    "Instead of random test rows, keep the last rows of the file (or the last groups) for testing: the model is trained on the past and scored on the future. This shows how it copes when conditions drift over time.":
+        "不隨機抽測試資料，而是保留檔案最後面的資料（或最後的群組）做測試：用過去訓練、用未來評分。可以看出條件隨時間漂移時模型撐不撐得住。",
+    "Fixes the random choices (splits, initial weights, synthetic rows). The same data, settings and seed reproduce the same result.":
+        "固定所有隨機選擇（切分、初始權重、合成資料）。相同資料、設定與種子會得到相同結果。",
+    "The score comes from the evaluation. Afterwards the kept models are trained once more on every row, so the saved models use all the data.":
+        "分數來自評估階段。之後保留的模型會再用全部資料訓練一次，讓儲存的模型用上所有資料。",
+    "After the first round, the best few candidates per target are re-scored with repeated nested cross-validation, tuning their settings without ever touching the test folds. More trustworthy, many times slower.":
+        "第一輪結束後，每個目標的前幾名候選會用重複的巢狀交叉驗證重新評分，調參過程完全不碰測試折。結果更可信，但耗時多出數倍。",
+    "Also re-check whether augmentation really helps": "同時複核資料擴增是否真的有幫助",
+    "Candidates per target": "每個目標的候選數",
+    "How many of the best first-round configurations per target are re-checked.":
+        "每個目標要複核第一輪中排名最前的幾個設定組合。",
+    "Outer folds": "外層折數",
+    "Folds of the outer cross-validation that produces the confirmed score.":
+        "產生複核分數的外層交叉驗證折數。",
+    "Repeats": "重複次數",
+    "Repeats the outer cross-validation with new random splits, which shows how much the score varies. Multiplies the run time.":
+        "以新的隨機切分重複外層交叉驗證，可看出分數的變動幅度。執行時間會成倍增加。",
+    "Inner folds": "內層折數",
+    "Folds used inside each outer training part to choose settings, so the outer test fold never influences the choice.":
+        "在每個外層訓練部分內部用來挑選設定的折數，因此外層測試折完全不影響選擇。",
+    "Settings tried": "嘗試的設定數",
+    "How many setting combinations each candidate may try per outer fold.":
+        "每個候選在每個外層折中最多嘗試幾組設定。",
+    "Re-scores the candidate with and without the selected augmentation on identical folds, so you can see whether the synthetic rows really help.":
+        "在完全相同的折上，比較候選「有 / 沒有」資料擴增的分數，看合成資料是否真的有幫助。",
+    "Load the separate data file": "載入獨立資料檔",
+    "A file that took no part in choosing the model. It is read only for the single final score.":
+        "完全沒參與模型挑選的檔案，只用於最後一次評分。",
+    "No separate file loaded yet": "尚未載入獨立資料檔",
+    "Row ID in that file (optional)": "該檔案的資料列 ID（選填）",
+    "A column that identifies each row of the separate file. It is only used to line rows up in the report, never as a model input.":
+        "用來識別獨立資料檔每一列的欄位，只用於報告中對齊資料列，絕不當作模型輸入。",
+    "Column in this data": "本資料的欄位",
+    "Matching column in the separate file": "獨立資料檔中對應的欄位",
+    "Pick, for every input and target, the matching column of the separate file. Every one must be mapped.":
+        "為每個輸入與目標選出獨立資料檔中對應的欄位，每一個都必須對應。",
+    "The separate file's targets are read only after the best model has been chosen and frozen.":
+        "獨立資料檔的目標值只有在最佳模型選定並凍結後才會被讀取。",
+    "2 · Models to compare": "2 · 要比較的模型",
+    "Recommended": "建議組合",
+    "All available": "全部可用",
+    "None": "全不選",
+    "{count} selected": "已選 {count} 個",
+    "Baselines": "基準模型",
+    "Trees and boosting": "樹模型與 Boosting",
+    "Pretrained for small tables": "小型表格預訓練模型",
+    "Neural networks": "神經網路",
+    "Ordered or grouped inputs only": "僅適用有序 / 分組輸入",
+    "Other": "其他",
+    "Adds this model to every compatible combination.": "將此模型加入所有相容的組合。",
+    "{name} (not installed)": "{name}（未安裝）",
+    "TabPFN v2: a network pre-trained on millions of synthetic tables that predicts a new table without per-dataset training. Usually one of the strongest models below a few thousand rows. Uses the v2 weights, which need no account; they download once (about 45 MB).":
+        "TabPFN v2：在數百萬個合成表格上預訓練的網路，不需針對資料集訓練即可直接預測。在數千筆以下的資料通常是最強的模型之一。使用不需註冊帳號的 v2 權重，首次使用時下載一次（約 45 MB）。",
+    "3 · Neural-network training": "3 · 神經網路訓練",
+    "Used by: {models}": "使用此設定的模型：{models}",
+    " and {count} more": " 等另外 {count} 個",
+    "No neural network is ticked, so none of these settings are used.":
+        "目前沒有勾選任何神經網路，這些設定不會被使用。",
+    "Preset": "預設組合",
+    "Quick": "快速",
+    "Balanced": "平衡",
+    "Thorough": "完整",
+    "Custom": "自訂",
+    "Fills in Max epochs and Patience. Quick 250/20, Balanced 500/30, Thorough 2000/60. Editing either value switches to Custom.":
+        "自動填入「最大 epoch」與「耐心值」：快速 250/20、平衡 500/30、完整 2000/60。手動修改任一值會切換為「自訂」。",
+    "Max epochs": "最大 epoch",
+    "Upper limit on passes over the training rows. Training usually stops earlier through early stopping.":
+        "訓練資料最多跑幾輪。通常會因提前停止而更早結束。",
+    "Patience": "耐心值",
+    " epochs": " epoch",
+    "Stop when the early-stopping score has not improved for this many epochs, and keep the best epoch.":
+        "提前停止的監看分數連續這麼多個 epoch 沒有進步就停止，並保留最佳的那一個 epoch。",
+    "Rows per weight update. Smaller is noisier, larger is faster.":
+        "每次更新權重使用的資料筆數。越小越不穩定，越大越快。",
+    "Step size of each weight update. Too large is unstable, too small is slow.":
+        "每次權重更新的步伐。太大會不穩定，太小會收斂很慢。",
+    "Early-stopping share": "提前停止監看比例",
+    "Share of each training part watched for early stopping. It is taken from the training rows only; test rows are never used.":
+        "從每個訓練部分切出來監看提前停止的比例。只取自訓練資料，絕不使用測試資料。",
+    "Model size": "模型大小",
+    "Auto — grows with the training rows": "自動——隨訓練資料量調整",
+    "Fixed": "固定",
+    "Auto scales network width with the square root of the real training rows (500 rows = preset width, clipped to ×0.5–×3). Fixed always uses the preset width times the size factor.":
+        "自動：網路寬度依「真實訓練資料筆數的平方根」縮放（500 筆 = 預設寬度，限制在 ×0.5～×3）。固定：一律使用預設寬度 × 大小倍率。",
+    "Size factor": "大小倍率",
+    "Extra size factor": "額外大小倍率",
+    "Multiplies the network width. In Auto mode it multiplies the automatic size.":
+        "放大或縮小網路寬度。自動模式下是乘在自動計算的大小上。",
+    "With about {rows} training rows, networks use ×{scale:.2f} of the preset width.":
+        "約 {rows} 筆訓練資料時，網路寬度為預設的 ×{scale:.2f}。",
+    "The width is set per fold from the number of training rows.":
+        "每一折會依該折的訓練資料筆數決定寬度。",
+    "Every fold uses ×{scale:.2f} of the preset width.": "每一折都使用預設寬度的 ×{scale:.2f}。",
+    "Loss functions": "損失函數",
+    "How a network measures its error while training. Each extra tick trains every network once more. Huber is a good choice for noisy measurements.":
+        "網路訓練時衡量誤差的方式。每多勾一個，每個網路就多訓練一次。量測雜訊大時 Huber 是不錯的選擇。",
+    "4 · Scaling and repeats": "4 · 標準化與重複",
+    "Standard: centre on the training mean and divide by the standard deviation. Suits most models.":
+        "Standard：以訓練資料平均值置中、除以標準差。適用大多數模型。",
+    "Robust: centre on the median and divide by the interquartile range, so outliers matter less.":
+        "Robust：以中位數置中、除以四分位距，離群值影響較小。",
+    "MinMax: squeeze into 0–1 using the training minimum and maximum. Sensitive to extreme values.":
+        "MinMax：用訓練資料的最小值與最大值壓縮到 0～1。對極端值很敏感。",
+    "Scaling": "標準化",
+    "How inputs and targets are rescaled, learned from the training part of each fold only. Every ticked option is compared as its own configuration.":
+        "輸入與目標的縮放方式，只從每一折的訓練部分學得。每個勾選的選項都會作為獨立設定比較。",
+    "Repeat each model": "每個模型重複",
+    "Trains every configuration again with a different random start and pools the predictions. Reduces luck for random models; multiplies the run time.":
+        "以不同的隨機起點重新訓練每個設定並合併預測。可降低隨機模型的運氣成分，但執行時間會成倍增加。",
+    "5 · Synthetic training rows (optional)": "5 · 合成訓練資料（資料擴增，選用）",
+    "Mode": "模式",
+    "Off — train on real rows only": "關閉——只用真實資料訓練",
+    "Compare each method against no augmentation": "逐一比較每種方法與「不擴增」",
+    "Synthetic rows are made only from the training part of each fold, so they can never leak into the score. 'Compare' trains one extra configuration per method; 'Combine' trains one with all methods together.":
+        "合成資料只由每一折的訓練部分產生，因此不可能洩漏到評分中。「逐一比較」會為每種方法多訓練一個設定；「合併」則把所有方法一起用在一個設定。",
+    "Keep the real rows in the training set": "訓練集中保留真實資料",
+    "Synthetic rows per real row": "每筆真實資料產生的合成筆數",
+    "0.5 adds about half as many synthetic rows as there are training rows.":
+        "0.5 代表合成資料約為訓練資料筆數的一半。",
+    "Multiply that by": "再乘以",
+    "Repeats the synthetic-row generation. More rows and more time; this is not the same as repeating a model.":
+        "重複產生合成資料。資料越多、時間越長；這和「每個模型重複」不同。",
+    "Ticked: train on real plus synthetic rows. Cleared: synthetic rows only. The no-augmentation baseline is always trained as well.":
+        "勾選：用真實＋合成資料訓練；取消：只用合成資料。「不擴增」的基準設定一定會一起訓練。",
+    "Shape of the mixing weight between two rows. Larger mixes closer to the middle; smaller stays close to one of the two rows.":
+        "兩筆資料混合權重的分布形狀。越大越接近中間；越小越貼近其中一筆。",
+    "Noise level": "雜訊強度",
+    "Noise as a fraction of each feature's standard deviation.": "雜訊大小，以各特徵標準差的比例表示。",
+    "Chance that each feature is blanked to its mean in a synthetic row.":
+        "合成資料中每個特徵被遮蔽成平均值的機率。",
+    "Beta shape of the scaling applied to the minor joint X/y directions.":
+        "套用在次要 X/y 聯合方向上之縮放的 Beta 形狀參數。",
+    "FOMA kept components (k)": "FOMA 保留成分數（k）",
+    "How many leading joint X/y directions FOMA leaves untouched.": "FOMA 保持不動的前幾個 X/y 聯合主方向數。",
+    "Synthetic rows cannot add information the real rows do not have. They only help when they encode a real measurement tolerance.":
+        "合成資料無法增加真實資料沒有的資訊；只有當它反映真實的量測誤差範圍時才有幫助。",
+    "6 · Output": "6 · 輸出",
+    "Report folder": "報告資料夾",
+    "Each run creates its own run_<date>_<time> subfolder here, so earlier results are never overwritten.":
+        "每次執行都會在這裡建立自己的 run_<日期>_<時間> 子資料夾，舊結果不會被覆蓋。",
+    "e.g. NH3 first pass (blank uses the folder name)": "例如：NH3 第一次試跑（空白則使用資料夾名稱）",
+    "Written into every kept model, and shown on the Model library tab.":
+        "會寫入每個保留的模型，並顯示在「模型庫」分頁。",
+    "Only the top {limit} models per target are saved, and only if their R² is above 0 (better than always predicting the mean).":
+        "每個目標只儲存前 {limit} 名模型，且 R² 必須大於 0（比「永遠猜平均值」好）。",
+    "Generate the combinations on the Data tab to see how large this run is.":
+        "在「資料」分頁產生排列組合後，這裡會顯示本次執行的規模。",
+    "Settings incomplete: {reason}": "設定不完整：{reason}",
+    "This run trains about {fits:,} models: {combos} combination(s) × {models} model(s) × settings × {splits} split(s).":
+        "本次約訓練 {fits:,} 個模型：{combos} 個組合 × {models} 個模型 × 設定 × {splits} 次切分。",
+    "The double-check stage adds many more.": "複核階段還會再增加許多。",
+    "Load data on the Data tab first.": "請先在「資料」分頁載入資料。",
+    "✓ Rows are grouped by “{column}”: rows of one group are never split between training and testing.":
+        "✓ 資料依「{column}」分組：同一組的資料絕不會同時出現在訓練與測試中。",
+    "⚠ No Group ID. If several rows come from the same day, tank or subject, set that column as Group ID on the Data tab — otherwise the score is too optimistic.":
+        "⚠ 未設定 Group ID。如果多筆資料來自同一天、同一缸或同一個體，請在「資料」分頁把該欄設為 Group ID——否則分數會過度樂觀。",
+    "  Warning: no Group ID. If several rows come from the same day, tank or subject, this score is optimistic.":
+        "  警告：未設定 Group ID。如果多筆資料來自同一天、同一缸或同一個體，這個分數會過度樂觀。",
+    "  Holdout uses the most recent rows (data order) as the test set.":
+        "  Holdout 以最新的資料列（依資料順序）作為測試集。",
+    "Suggested as the Group ID: several rows share the same value, so they are not independent. Rows of one group are kept together when splitting. Set it back to Skip if every row is independent.":
+        "建議作為 Group ID：多筆資料共用相同的值，彼此並不獨立。切分時同一組會放在一起。若每一筆都是獨立的，請改回「略過」。",
+    "{count} extreme value(s), e.g. {value:g} — typo or another population?":
+        "{count} 個極端值，例如 {value:g}——輸入錯誤，或是另一個族群？",
+    "constant column — carries no information": "常數欄位——不含任何資訊",
+    "exactly {value:.4g} × {other} — the same information": "恰好是 {value:.4g} × {other}——資訊完全相同",
+    "ρ = {value:.2f} with {other} — nearly the same information": "與 {other} 的 ρ = {value:.2f}——資訊幾乎相同",
+    "⚠ {count} data check(s) flagged in the Audit column.": "⚠ 稽核欄標出 {count} 項資料檢查。",
 }

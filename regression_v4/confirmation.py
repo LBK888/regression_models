@@ -19,6 +19,7 @@ from .evaluation import (
     _make_scaler,
     augmentation_incompatibility_reason,
     rank_within_target_tasks,
+    training_options,
 )
 from .metrics import RegressionMetrics, calculate_regression_metrics
 from .models import NEURAL_MODEL_IDS, create_model
@@ -272,6 +273,8 @@ def model_search_space(
             {"k": 32, "n_blocks": blocks, "d_block": width, "learning_rate": rate}
             for blocks, width, rate in itertools.product((1, 2, 3), (64, 128, 256), (0.0005, 0.002))
         )
+    elif model_id == "tabpfn":
+        grid = tuple({"n_estimators": value} for value in (4, 8, 16))
     elif model_id == "realmlp":
         grid = tuple(
             {"learning_rate": rate, "batch_size": batch}
@@ -349,19 +352,15 @@ def _macro_nmae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.mean(values))
 
 
-def _training_options(config: EvaluationConfig, finalist: PromotedFinalist, parameters: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
-    options = {
-        "epochs": config.epochs,
-        "patience": config.patience,
-        "batch_size": config.batch_size,
-        "learning_rate": config.learning_rate,
-        "validation_ratio": config.validation_ratio,
-        "model_multiplier": config.model_multiplier,
-        "loss_id": finalist.screening_result.loss_id if finalist.screening_result.loss_id != "native" else "mse",
-        "input_columns": finalist.experiment.input_columns,
-        "feature_structure": finalist.experiment.feature_structure.value,
-        "structure_confirmed": finalist.experiment.structure_confirmed,
-    }
+def _training_options(
+    config: EvaluationConfig,
+    finalist: PromotedFinalist,
+    parameters: Mapping[str, Any],
+    capacity_rows: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    options = training_options(
+        config, finalist.experiment, finalist.screening_result.loss_id, capacity_rows
+    )
     model_parameters = dict(parameters)
     if finalist.model_id in NEURAL_MODELS:
         for name in ("learning_rate", "model_multiplier"):
@@ -390,7 +389,9 @@ def _fit_predict(
     X_train, y_train = _augment_scaled_training(
         X_train, y_train, methods, finalist.experiment, training_config, seed
     )
-    options, model_parameters = _training_options(training_config, finalist, parameters)
+    options, model_parameters = _training_options(
+        training_config, finalist, parameters, len(train_indexes)
+    )
     model = create_model(
         finalist.model_id,
         seed,

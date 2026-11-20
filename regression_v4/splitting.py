@@ -42,7 +42,39 @@ class IndexSplit:
     test: np.ndarray
 
 
-def holdout_split(identity: DatasetIdentity, test_size: float, random_seed: int) -> IndexSplit:
+def chronological_holdout_split(identity: DatasetIdentity, test_size: float) -> IndexSplit:
+    """Hold out the *last* rows in data order: train on the past, test on the future.
+
+    With a Group ID, whole groups move together (a group is placed by its first
+    row), so the most recent groups form the test set. This is the split that
+    matches deployment when the process drifts over time.
+    """
+
+    indexes = np.arange(identity.size, dtype=int)
+    target = max(1, int(np.ceil(identity.size * test_size)))
+    if identity.group_ids is None:
+        return IndexSplit(train=indexes[:-target], test=indexes[-target:])
+    groups = identity.group_ids
+    order = list(dict.fromkeys(groups.tolist()))
+    test_groups: set[object] = set()
+    counts = {group: int(np.sum(groups == group)) for group in order}
+    held = 0
+    for group in reversed(order):
+        if held >= target or len(test_groups) == len(order) - 1:
+            break
+        test_groups.add(group)
+        held += counts[group]
+    mask = np.asarray([group in test_groups for group in groups.tolist()])
+    return IndexSplit(train=indexes[~mask], test=indexes[mask])
+
+
+def holdout_split(
+    identity: DatasetIdentity,
+    test_size: float,
+    random_seed: int,
+    *,
+    chronological: bool = False,
+) -> IndexSplit:
     """Create a holdout split; a zero test ratio deliberately returns no test rows."""
 
     if not 0.0 <= test_size <= 0.50:
@@ -50,6 +82,8 @@ def holdout_split(identity: DatasetIdentity, test_size: float, random_seed: int)
     indexes = np.arange(identity.size, dtype=int)
     if test_size == 0:
         return IndexSplit(train=indexes, test=np.empty(0, dtype=int))
+    if chronological:
+        return chronological_holdout_split(identity, test_size)
     if identity.group_ids is not None:
         splitter = GroupShuffleSplit(n_splits=1, test_size=test_size, random_state=random_seed)
         train, test = next(splitter.split(indexes, groups=identity.group_ids))

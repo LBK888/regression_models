@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator, Mapping, Sequence
 
 from i18n import tr
+from regression_v4.domain import per_column_labels
 from project_paths import (
     DEFAULT_OUTPUT_ROOT,
     LIBRARY_INDEX_PATH,
@@ -331,8 +332,15 @@ def build_entry(path: Path, index: LibraryIndex) -> ModelEntry:
         rank=rank if isinstance(rank, int) else None,
         evidence_stage=str(meta.get("evidence_stage") or ""),
         architecture=str(meta.get("architecture") or ""),
-        feature_names=tuple(str(name) for name in (meta.get("feature_labels") or meta.get("feature_names") or ())),
-        target_names=tuple(str(name) for name in (meta.get("target_labels") or meta.get("target_names") or ())),
+        # Sidecars written before the per-column label fix carry one label per
+        # selection unit (a Combined input of nine columns had one label), so
+        # trust labels only when their count matches the real column names.
+        feature_names=per_column_labels(
+            meta.get("feature_labels") or (), meta.get("feature_names") or meta.get("feature_labels") or ()
+        ),
+        target_names=per_column_labels(
+            meta.get("target_labels") or (), meta.get("target_names") or meta.get("target_labels") or ()
+        ),
         metrics=metrics,
         trained_at=str(meta.get("saved_at") or ""),
         size_bytes=size,

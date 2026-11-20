@@ -15,6 +15,15 @@ from typing import Mapping, Sequence
 import matplotlib
 
 matplotlib.use("Agg")
+# Same font list as the batch report, so Chinese sheet and column names in the
+# figures render instead of falling back to empty boxes.
+matplotlib.rcParams["font.sans-serif"] = [
+    "Microsoft JhengHei",
+    "Noto Sans CJK TC",
+    "Arial Unicode MS",
+    "DejaVu Sans",
+]
+matplotlib.rcParams["axes.unicode_minus"] = False
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_pdf import PdfPages
 import numpy as np

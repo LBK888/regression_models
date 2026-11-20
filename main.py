@@ -56,9 +56,6 @@ def _self_test() -> int:
     if missing:
         print(json.dumps({"status": "error", "missing_models": sorted(missing)}, indent=2))
         return 1
-    if "tabpfn" in visible:
-        print(json.dumps({"status": "error", "reason": "TabPFN should have been removed"}, indent=2))
-        return 1
 
     truth = np.array([[1.0], [2.0], [3.0], [4.0]])
     metrics = calculate_regression_metrics(truth, truth + 0.1, ("check",))

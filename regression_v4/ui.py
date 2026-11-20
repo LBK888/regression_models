@@ -10,10 +10,11 @@ from dataclasses import replace
 import numpy as np
 
 from PyQt6.QtCore import QAbstractTableModel, QModelIndex, QSortFilterProxyModel, Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QCloseEvent, QDragEnterEvent, QDropEvent
+from PyQt6.QtGui import QCloseEvent, QColor, QDragEnterEvent, QDropEvent
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -31,6 +32,8 @@ from PyQt6.QtWidgets import (
     QPlainTextEdit,
     QProgressBar,
     QPushButton,
+    QRadioButton,
+    QScrollArea,
     QSpinBox,
     QSplitter,
     QStyledItemDelegate,
@@ -85,10 +88,13 @@ from .evaluation import (
     select_retained_results,
 )
 from .models import (
-    ModelAvailability,
+    LOSS_CONFIGURABLE_MODEL_IDS,
+    NEURAL_MODEL_IDS,
+    adaptive_capacity_scale,
     model_incompatibility_reason,
     model_registry,
 )
+from .data_audit import audit_columns
 from .reporting import MasterReportBuilder, ReportArtifacts, build_no_evidence_report
 from .splitting import DatasetIdentity
 
@@ -106,7 +112,48 @@ def role_options() -> dict[str, str]:
         "group_id": tr("Group ID (not a feature)"),
     }
 
-HELP_GLYPH = "⍰"
+#: How the model check boxes are grouped on the settings page. Titles are
+#: translated when the page is built; a model missing here lands in "Other".
+MODEL_SECTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Baselines", ("mean", "ridge", "pls", "svr_rbf")),
+    ("Trees and boosting", ("random_forest", "extra_trees", "catboost", "xgboost", "lightgbm")),
+    ("Pretrained for small tables", ("tabpfn",)),
+    (
+        "Neural networks",
+        (
+            "deep_mlp",
+            "wide_mlp",
+            "residual_mlp",
+            "multi_branch_mlp",
+            "bottleneck_mlp",
+            "mlp_embeddings",
+            "ft_transformer",
+            "modern_nca",
+            "tabm",
+            "realmlp",
+        ),
+    ),
+    ("Ordered or grouped inputs only", ("cnn1d", "resnet1d", "grouped_fusion")),
+)
+
+#: Column names (lower-case, letters and digits only) that usually mark rows
+#: measured together. A repeated column with one of these names is suggested as
+#: the Group ID so cross-validation never splits one day across train and test.
+REPEATED_MEASURE_TOKENS = frozenset(
+    {
+        "date", "day", "sampledate", "samplingdate", "measurementdate",
+        "日期", "採樣日期", "采样日期", "取樣日期", "量測日期", "測量日期",
+        "batch", "batchid", "批次", "tank", "tankid", "pond", "池號", "缸號",
+    }
+)
+
+#: The "Recommended" button: strong, cheap models for a few hundred rows.
+RECOMMENDED_MODEL_IDS = frozenset(
+    {"mean", "ridge", "pls", "svr_rbf", "random_forest", "extra_trees", "catboost", "tabpfn"}
+)
+
+#: Ticked when the page opens.
+DEFAULT_MODEL_IDS = frozenset({"mean", "ridge", "pls", "svr_rbf", "extra_trees", "tabpfn"})
 
 
 def model_help() -> dict[str, str]:
@@ -182,6 +229,12 @@ def model_help() -> dict[str, str]:
         "modern_nca": tr(
             "ModernNCA: learns an embedding where similar targets sit close together, "
             "then predicts from neighbours. Useful for exploring local sample structure."
+        ),
+        "tabpfn": tr(
+            "TabPFN v2: a network pre-trained on millions of synthetic tables that "
+            "predicts a new table without per-dataset training. Usually one of the "
+            "strongest models below a few thousand rows. Uses the v2 weights, which need "
+            "no account; they download once (about 45 MB)."
         ),
         "tabm": tr(
             "TabM: a parameter-shared multi-member tabular network ensemble. Runs only "
@@ -267,10 +320,12 @@ class DatasetDropFrame(QFrame):
         self.setAcceptDrops(True)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         layout = QVBoxLayout(self)
-        label = QLabel(tr("Drag a CSV / Excel file here, or use the button below"))
+        layout.setContentsMargins(10, 2, 10, 2)
+        label = QLabel(tr("Drop a CSV / Excel file here"))
+        label.setObjectName("hint")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(label)
-        self.setMinimumHeight(70)
+        self.setMinimumHeight(34)
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         urls = event.mimeData().urls()
@@ -294,7 +349,7 @@ class CollapsibleSection(QWidget):
         self.toggle_button = QPushButton()
         self.toggle_button.setCheckable(True)
         self.toggle_button.setChecked(expanded)
-        self.toggle_button.setStyleSheet("text-align: left; font-weight: 600; padding: 6px;")
+        self.toggle_button.setObjectName("sectionToggle")
         self.content_widget = QWidget()
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
         layout.addWidget(self.toggle_button)
@@ -810,6 +865,20 @@ class BenchmarkWorker(QThread):
                 if self.observation_ref is None:
                     self.log_message.emit(tr("  Warning: no Observation ID was named; row position is used as the alignment fallback."))
                 self.log_message.emit(f"  rows={len(X)}, dropped={dropped}, grouped={identity.is_grouped}")
+                if not identity.is_grouped:
+                    self.log_message.emit(
+                        tr(
+                            "  Warning: no Group ID. If several rows come from the same day, "
+                            "tank or subject, this score is optimistic."
+                        )
+                    )
+                if (
+                    self.config.strategy == EvaluationStrategy.HOLDOUT
+                    and self.config.holdout_chronological
+                ):
+                    self.log_message.emit(
+                        tr("  Holdout uses the most recent rows (data order) as the test set.")
+                    )
                 def on_progress(state: ProgressState, experiment_id: str = spec.experiment_id) -> None:
                     if self.isInterruptionRequested():
                         raise InterruptedError
@@ -1250,18 +1319,23 @@ class TrainingPage(QWidget):
         self.tabs.addTab(self._build_run_tab(), tr("3. Run and report"))
         layout.addWidget(self.tabs)
 
+    # ------------------------------------------------------------ data tab
     def _build_data_tab(self) -> QWidget:
         tab = QWidget()
         layout = QVBoxLayout(tab)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(6)
+        row = QHBoxLayout()
         drop = DatasetDropFrame()
         drop.file_dropped.connect(self.load_dataset)
-        layout.addWidget(drop)
-        row = QHBoxLayout()
         browse = QPushButton(tr("Choose a data file"))
         browse.clicked.connect(self.browse_dataset)
         self.dataset_label = QLabel(tr("No data loaded"))
+        self.dataset_label.setObjectName("hint")
+        self.dataset_label.setMinimumWidth(80)
         preview = QPushButton(tr("Generate / refresh combinations"))
         preview.clicked.connect(self.generate_preview)
+        row.addWidget(drop)
         row.addWidget(browse)
         row.addWidget(self.dataset_label, 1)
         row.addWidget(preview)
@@ -1271,6 +1345,9 @@ class TrainingPage(QWidget):
         )
         self.dataset_summary.setWordWrap(True)
         layout.addWidget(self.dataset_summary)
+        self.data_group_status_label = QLabel()
+        self.data_group_status_label.setWordWrap(True)
+        layout.addWidget(self.data_group_status_label)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         self.role_tree = QTreeWidget()
@@ -1289,6 +1366,7 @@ class TrainingPage(QWidget):
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(0, 0, 0, 0)
         tools = QHBoxLayout()
         self.combo_label = QLabel(tr("No combinations generated yet"))
         self.filter_edit = QLineEdit()
@@ -1298,15 +1376,18 @@ class TrainingPage(QWidget):
         all_button = QPushButton(tr("Select all"))
         none_button = QPushButton(tr("Select none"))
         invert_button = QPushButton(tr("Invert"))
-        confirm_structures_button = QPushButton(
+        confirm_structures_button = QPushButton(tr("Confirm structure"))
+        confirm_structures_button.setToolTip(
             tr("Confirm the suggested structure for the selected combinations")
         )
-        tools.addWidget(self.combo_label)
+        for button in (all_button, none_button, invert_button, confirm_structures_button):
+            button.setObjectName("secondaryBtn")
         tools.addWidget(self.filter_edit, 1)
         tools.addWidget(all_button)
         tools.addWidget(none_button)
         tools.addWidget(invert_button)
         tools.addWidget(confirm_structures_button)
+        right_layout.addWidget(self.combo_label)
         right_layout.addLayout(tools)
         self.table_model = ExperimentTableModel(self.catalog)
         self.proxy_model = QSortFilterProxyModel(self)
@@ -1337,857 +1418,939 @@ class TrainingPage(QWidget):
         confirm_structures_button.clicked.connect(self._confirm_selected_structures)
         self.table_model.dataChanged.connect(self._update_selection_label)
         splitter.addWidget(right)
-        splitter.setSizes((700, 820))
+        splitter.setSizes((660, 620))
         layout.addWidget(splitter, 1)
         return tab
 
-    def _help_label(self, text: str, explanation: str) -> QLabel:
-        label = QLabel(f"{text} {HELP_GLYPH}")
-        label.setToolTip(explanation)
-        self.setting_help_labels.append(label)
+    # --------------------------------------------------------- form helpers
+    @staticmethod
+    def _hint(text: str = "", *, object_name: str = "hint") -> QLabel:
+        label = QLabel(text)
+        label.setObjectName(object_name)
+        label.setWordWrap(True)
         return label
 
-    def _help_control(self, control: QWidget, explanation: str, *, append_question: bool = False) -> QWidget:
+    @staticmethod
+    def _compact_form() -> QFormLayout:
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(5)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.FieldsStayAtSizeHint)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        return form
+
+    @staticmethod
+    def _plain_container() -> QWidget:
+        widget = QWidget()
+        widget.setObjectName("plain")
+        return widget
+
+    @staticmethod
+    def _int_spin(minimum: int, maximum: int, value: int, *, suffix: str = "") -> QSpinBox:
+        spin = QSpinBox()
+        spin.setRange(minimum, maximum)
+        spin.setValue(value)
+        spin.setSuffix(suffix)
+        spin.setMinimumWidth(120)
+        return spin
+
+    @staticmethod
+    def _float_spin(
+        minimum: float,
+        maximum: float,
+        value: float,
+        *,
+        step: float,
+        decimals: int = 2,
+        suffix: str = "",
+    ) -> QDoubleSpinBox:
+        spin = QDoubleSpinBox()
+        spin.setDecimals(decimals)
+        spin.setRange(minimum, maximum)
+        spin.setSingleStep(step)
+        spin.setValue(value)
+        spin.setSuffix(suffix)
+        spin.setMinimumWidth(120)
+        return spin
+
+    def _form_row(self, form: QFormLayout, text: str, control: QWidget, explanation: str) -> QLabel:
+        """Add a labelled row; the explanation is the tooltip on both halves."""
+
+        label = QLabel(text)
+        label.setToolTip(explanation)
         control.setToolTip(explanation)
-        if append_question and hasattr(control, "text") and hasattr(control, "setText"):
-            current = control.text()  # type: ignore[attr-defined]
-            if not current.rstrip().endswith(HELP_GLYPH):
-                control.setText(f"{current} {HELP_GLYPH}")  # type: ignore[attr-defined]
+        self.setting_help_labels.append(label)
+        self.setting_help_controls.append(control)
+        form.addRow(label, control)
+        return label
+
+    def _tip(self, control: QWidget, explanation: str) -> QWidget:
+        control.setToolTip(explanation)
         self.setting_help_controls.append(control)
         return control
 
-    def _add_help_row(
-        self,
-        form: QFormLayout,
-        text: str,
-        control: QWidget,
-        explanation: str,
-    ) -> None:
-        self._help_control(control, explanation)
-        form.addRow(self._help_label(text, explanation), control)
-
+    # ------------------------------------------------------ settings page
     def _build_config_tab(self) -> QWidget:
-        tab = QWidget()
-        layout = QGridLayout(tab)
-        evaluation = QGroupBox(f"Evaluation Strategy {HELP_GLYPH}")
-        evaluation.setToolTip(
-            tr(
-                "Decides how generalization evidence is produced. This is not a "
-                "parameter preset: switching strategy only disables the fields that do "
-                "not apply, and keeps the values you entered."
-            )
+        """Settings in decision order; only what the current choices use is shown.
+
+        Every value survives being hidden: switching strategy, models or the
+        augmentation mode only changes visibility, never the numbers typed in.
+        """
+
+        self._settings_ready = False
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        content.setObjectName("settingsPage")
+        columns = QHBoxLayout(content)
+        columns.setContentsMargins(8, 4, 8, 8)
+        columns.setSpacing(10)
+        left = QVBoxLayout()
+        right = QVBoxLayout()
+        left.setSpacing(8)
+        right.setSpacing(8)
+        columns.addLayout(left, 1)
+        columns.addLayout(right, 1)
+        scroll.setWidget(content)
+
+        left.addWidget(self._build_evaluation_box())
+        left.addWidget(self._build_neural_box())
+        left.addWidget(self._build_preparation_box())
+        left.addStretch(1)
+        right.addWidget(self._build_models_box())
+        right.addWidget(self._build_augmentation_section())
+        right.addWidget(self._build_output_box())
+        self.run_estimate_label = self._hint()
+        right.addWidget(self.run_estimate_label)
+        right.addStretch(1)
+
+        self._settings_ready = True
+        self._refresh_settings_visibility()
+        return scroll
+
+    def _build_evaluation_box(self) -> QWidget:
+        box = QGroupBox(tr("1 · How to measure accuracy"))
+        layout = QVBoxLayout(box)
+        layout.setSpacing(4)
+
+        self.group_status_label = QLabel()
+        self.group_status_label.setWordWrap(True)
+        layout.addWidget(self.group_status_label)
+
+        self.strategy_group = QButtonGroup(self)
+        self.strategy_buttons: dict[EvaluationStrategy, QRadioButton] = {}
+        self.strategy_descriptions = {
+            EvaluationStrategy.NESTED_CV: tr(
+                "Every row is predicted once by a model that never saw it. The most "
+                "reliable score for small data sets."
+            ),
+            EvaluationStrategy.HOLDOUT: tr(
+                "Sets part of the data aside once and scores the models on it. Quick, "
+                "but on small data the score depends a lot on which rows were picked."
+            ),
+            EvaluationStrategy.EXTERNAL_VALIDATION: tr(
+                "Picks the best model by cross-validation on this data, then scores it "
+                "once on a second, independent data file."
+            ),
+            EvaluationStrategy.TRAIN_FINAL_ONLY: tr(
+                "Fits the models on every row and saves them without any score, so "
+                "nothing tells you whether they actually work."
+            ),
+        }
+        titles = (
+            (EvaluationStrategy.NESTED_CV, tr("Cross-validation (recommended)")),
+            (EvaluationStrategy.HOLDOUT, tr("One train / test split")),
+            (EvaluationStrategy.EXTERNAL_VALIDATION, tr("Score on a separate data file")),
+            (EvaluationStrategy.TRAIN_FINAL_ONLY, tr("Train only, no score")),
         )
-        form = QFormLayout(evaluation)
-        self.strategy_combo = QComboBox()
-        strategy_rows = (
-            (
-                tr("Two-stage benchmark: CV Screening + optional Confirmation"),
-                EvaluationStrategy.NESTED_CV,
-                tr(
-                    "K-fold Screening on the development data, with optional repeated "
-                    "nested Confirmation. Test ratio and External mapping are ignored."
-                ),
-            ),
-            (
-                tr("Holdout: one Train/Test split"),
-                EvaluationStrategy.HOLDOUT,
-                tr(
-                    "Splits off one test set at random according to Test ratio. "
-                    "Screening folds, Confirmation and External mapping are ignored."
-                ),
-            ),
-            (
-                tr("External Validation: an independent second dataset"),
-                EvaluationStrategy.EXTERNAL_VALIDATION,
-                tr(
-                    "Selects the configuration with development CV, then evaluates once "
-                    "against the mapped external data. Test ratio is ignored."
-                ),
-            ),
-            (
-                tr("Train Final Model Only: train, do not evaluate"),
-                EvaluationStrategy.TRAIN_FINAL_ONLY,
-                tr(
-                    "Builds the final model straight from every development row. Test "
-                    "ratio, folds, Confirmation and External mapping are ignored, and no "
-                    "generalization metric is produced."
-                ),
-            ),
-        )
-        for label, strategy, explanation in strategy_rows:
-            self.strategy_combo.addItem(label, strategy)
-            self.strategy_combo.setItemData(
-                self.strategy_combo.count() - 1,
-                explanation,
-                Qt.ItemDataRole.ToolTipRole,
-            )
-        self._help_control(
-            self.strategy_combo,
-            tr(
-                "Evaluation Strategy picks the evidence workflow. Unlike Run preset it "
-                "never rewrites values such as epochs; settings that do not apply are "
-                "disabled and ignored at run time."
-            ),
-        )
-        self.test_spin = QDoubleSpinBox()
-        self.test_spin.setRange(0.0, 50.0)
-        self.test_spin.setSuffix(" %")
-        self.test_spin.setValue(20.0)
-        self.test_spin.setSingleStep(5.0)
-        self.folds_spin = QSpinBox()
-        self.folds_spin.setRange(2, 10)
-        self.folds_spin.setValue(3)
-        self.seed_spin = QSpinBox()
-        self.seed_spin.setRange(0, 2_147_483_647)
-        self.seed_spin.setValue(42)
-        self.refit_check = QCheckBox(
-            tr("After evaluation, refit the final model on all available data")
-        )
+        radios = QGridLayout()
+        radios.setHorizontalSpacing(16)
+        radios.setVerticalSpacing(2)
+        for index, (strategy, title) in enumerate(titles):
+            button = QRadioButton(title)
+            button.setToolTip(self.strategy_descriptions[strategy])
+            self.strategy_group.addButton(button, index)
+            self.strategy_buttons[strategy] = button
+            radios.addWidget(button, index // 2, index % 2)
+        self.strategy_buttons[EvaluationStrategy.NESTED_CV].setChecked(True)
+        layout.addLayout(radios)
+        self.strategy_description_label = self._hint()
+        layout.addWidget(self.strategy_description_label)
+
+        form = self._compact_form()
+        self.strategy_form = form
+        self.folds_spin = self._int_spin(2, 20, 5)
+        self.test_spin = self._float_spin(0.0, 50.0, 20.0, step=5.0, decimals=0, suffix=" %")
+        self.chronological_check = QCheckBox(tr("Use the most recent rows as the test set"))
+        self.seed_spin = self._int_spin(0, 2_147_483_647, 42)
+        self.refit_check = QCheckBox(tr("Retrain the kept models on all rows before saving"))
         self.refit_check.setChecked(True)
         self.run_confirmation_check = QCheckBox(
-            tr("Run repeated nested Confirmation after Screening")
+            tr("Double-check the best candidates with nested cross-validation (slow)")
         )
-        self.run_confirmation_check.setChecked(False)
-        self.finalists_spin = QSpinBox(); self.finalists_spin.setRange(1, 20); self.finalists_spin.setValue(5)
-        self.confirmation_outer_folds_spin = QSpinBox(); self.confirmation_outer_folds_spin.setRange(2, 10); self.confirmation_outer_folds_spin.setValue(5)
-        self.confirmation_outer_repeats_spin = QSpinBox(); self.confirmation_outer_repeats_spin.setRange(1, 20); self.confirmation_outer_repeats_spin.setValue(3)
-        self.confirmation_inner_folds_spin = QSpinBox(); self.confirmation_inner_folds_spin.setRange(2, 10); self.confirmation_inner_folds_spin.setValue(3)
-        self.tuning_budget_spin = QSpinBox(); self.tuning_budget_spin.setRange(1, 100); self.tuning_budget_spin.setValue(8)
-        self.confirmation_aug_check = QCheckBox(
-            tr("Compare Original against the selected augmentation on identical outer folds")
-        )
-        self.confirmation_aug_check.setChecked(True)
-        self._add_help_row(
-            form, tr("Strategy"), self.strategy_combo,
+        self._form_row(
+            form, tr("Folds (K)"), self.folds_spin,
             tr(
-                "Chooses how generalization evidence is produced. It is not a preset: it "
-                "never rewrites the values below, it only uses or ignores the matching "
-                "fields."
+                "The data is cut into K parts; each part is predicted once by a model "
+                "trained on the other K−1 parts. 5 is a good default. With a Group ID, K "
+                "cannot exceed the number of groups."
             ),
         )
-        self._add_help_row(
-            form, tr("Test ratio"), self.test_spin,
+        self._form_row(
+            form, tr("Test share"), self.test_spin,
             tr(
-                "Holdout only: splits off one test set by percentage. At 0% every row "
-                "goes into the final fit, and no test evidence is produced."
+                "The share of rows (or of groups) set aside for scoring. At 0 % every row "
+                "is used for training and no score is produced."
             ),
         )
-        self._add_help_row(
-            form, tr("Screening folds"), self.folds_spin,
+        self._tip(
+            self.chronological_check,
             tr(
-                "Cuts the development data into K parts, evaluating on one and training "
-                "on the rest in turn. A larger K means more evaluations and more time."
+                "Instead of random test rows, keep the last rows of the file (or the last "
+                "groups) for testing: the model is trained on the past and scored on the "
+                "future. This shows how it copes when conditions drift over time."
             ),
         )
-        self._add_help_row(
+        form.addRow(self.chronological_check)
+        self._form_row(
             form, tr("Random seed"), self.seed_spin,
             tr(
-                "Controls the random sequence for splitting, initialization and "
-                "augmentation. The same data, settings and seed reproduce the result."
+                "Fixes the random choices (splits, initial weights, synthetic rows). The "
+                "same data, settings and seed reproduce the same result."
             ),
         )
-        self._help_control(
+        self._tip(
             self.refit_check,
             tr(
-                "Once evaluation has chosen a configuration, retrain a deployable final "
-                "model on every development row. That fit is not generalization evidence."
+                "The score comes from the evaluation. Afterwards the kept models are "
+                "trained once more on every row, so the saved models use all the data."
             ),
-            append_question=True,
         )
         form.addRow(self.refit_check)
-        self._help_control(
+        self._tip(
             self.run_confirmation_check,
             tr(
-                "Re-runs the candidates promoted from Screening through repeated nested "
-                "CV. More reliable, substantially more compute, CV strategies only."
+                "After the first round, the best few candidates per target are re-scored "
+                "with repeated nested cross-validation, tuning their settings without ever "
+                "touching the test folds. More trustworthy, many times slower."
             ),
-            append_question=True,
         )
         form.addRow(self.run_confirmation_check)
-        self._add_help_row(
-            form, tr("Finalists / Target Task"), self.finalists_spin,
-            tr(
-                "How many candidate configurations per identical output target are "
-                "promoted to Confirmation. More finalists means a longer Confirmation."
-            ),
-        )
-        self._add_help_row(
-            form, tr("Confirmation outer folds"), self.confirmation_outer_folds_spin,
-            tr(
-                "How many splits the outer Confirmation CV uses. Every outer test fold "
-                "stays entirely out of that round's tuning and training."
-            ),
-        )
-        self._add_help_row(
-            form, tr("Confirmation outer repeats"), self.confirmation_outer_repeats_spin,
-            tr(
-                "Repeats the whole outer CV with different seeds, which estimates the "
-                "variance of the result and multiplies the compute accordingly."
-            ),
-        )
-        self._add_help_row(
-            form, tr("Confirmation inner folds"), self.confirmation_inner_folds_spin,
-            tr(
-                "Inner CV runs only inside each outer training partition, so parameters "
-                "are never tuned against outer test data."
-            ),
-        )
-        self._add_help_row(
-            form, tr("Tuning budget / finalist"), self.tuning_budget_spin,
-            tr(
-                "How many parameter sets each finalist may try per outer fold. A larger "
-                "budget searches wider and takes longer."
-            ),
-        )
-        self._help_control(
-            self.confirmation_aug_check,
-            tr(
-                "Compares Original against the enabled augmentation on exactly the same "
-                "outer folds. Ignored under Original only."
-            ),
-            append_question=True,
-        )
-        form.addRow(self.confirmation_aug_check)
-        self.strategy_description_label = QLabel()
-        self.strategy_description_label.setWordWrap(True)
-        self.strategy_description_label.setStyleSheet("color: #315a7d; padding: 4px;")
-        form.addRow(self.strategy_description_label)
-        note = QLabel(
-            tr(
-                "Note: a greyed-out field is one the current strategy does not use. "
-                "Switching strategy keeps whatever you typed."
-            )
-        )
-        note.setWordWrap(True)
-        form.addRow(note)
-        self.confirmation_controls = (
-            self.finalists_spin,
-            self.confirmation_outer_folds_spin,
-            self.confirmation_outer_repeats_spin,
-            self.confirmation_inner_folds_spin,
-            self.tuning_budget_spin,
-            self.confirmation_aug_check,
-        )
-        self.strategy_combo.currentIndexChanged.connect(self._update_strategy_controls)
-        self.run_confirmation_check.toggled.connect(self._update_strategy_controls)
-        layout.addWidget(evaluation, 0, 0)
+        layout.addLayout(form)
 
-        models_box = QGroupBox(
-            tr("Models (greyed-out entries are kept on purpose, so none is forgotten)")
-            + f" {HELP_GLYPH}"
+        self.confirmation_panel = self._plain_container()
+        confirmation_form = self._compact_form()
+        confirmation_form.setContentsMargins(24, 0, 0, 0)
+        self.confirmation_panel.setLayout(confirmation_form)
+        self.confirmation_form = confirmation_form
+        self.finalists_spin = self._int_spin(1, 20, 5)
+        self.confirmation_outer_folds_spin = self._int_spin(2, 10, 5)
+        self.confirmation_outer_repeats_spin = self._int_spin(1, 20, 3)
+        self.confirmation_inner_folds_spin = self._int_spin(2, 10, 3)
+        self.tuning_budget_spin = self._int_spin(1, 100, 8)
+        self.confirmation_aug_check = QCheckBox(
+            tr("Also re-check whether augmentation really helps")
         )
-        models_box.setToolTip(
+        self.confirmation_aug_check.setChecked(True)
+        self._form_row(
+            confirmation_form, tr("Candidates per target"), self.finalists_spin,
+            tr("How many of the best first-round configurations per target are re-checked."),
+        )
+        self._form_row(
+            confirmation_form, tr("Outer folds"), self.confirmation_outer_folds_spin,
+            tr("Folds of the outer cross-validation that produces the confirmed score."),
+        )
+        self._form_row(
+            confirmation_form, tr("Repeats"), self.confirmation_outer_repeats_spin,
             tr(
-                "Tick the models to compare. Each extra model expands into more training "
-                "runs across the selected scalers, losses, augmentations and repetitions."
-            )
+                "Repeats the outer cross-validation with new random splits, which shows "
+                "how much the score varies. Multiplies the run time."
+            ),
         )
-        models_layout = QGridLayout(models_box)
-        helps = model_help()
-        for index, capability in enumerate(model_registry()):
-            check = QCheckBox(capability.display_name)
-            check.setEnabled(capability.enabled)
-            check.setChecked(capability.model_id in {"mean", "ridge", "pls", "svr_rbf"})
-            if capability.availability == ModelAvailability.COMING_LATER:
-                check.setText(f"{capability.display_name} — Coming Later")
-            elif not capability.enabled:
-                check.setText(f"{capability.display_name} — Inactive")
-            model_explanation = helps.get(
-                capability.model_id,
+        self._form_row(
+            confirmation_form, tr("Inner folds"), self.confirmation_inner_folds_spin,
+            tr(
+                "Folds used inside each outer training part to choose settings, so the "
+                "outer test fold never influences the choice."
+            ),
+        )
+        self._form_row(
+            confirmation_form, tr("Settings tried"), self.tuning_budget_spin,
+            tr("How many setting combinations each candidate may try per outer fold."),
+        )
+        self._tip(
+            self.confirmation_aug_check,
+            tr(
+                "Re-scores the candidate with and without the selected augmentation on "
+                "identical folds, so you can see whether the synthetic rows really help."
+            ),
+        )
+        confirmation_form.addRow(self.confirmation_aug_check)
+        layout.addWidget(self.confirmation_panel)
+
+        layout.addWidget(self._build_external_panel())
+        self.strategy_group.idToggled.connect(
+            lambda _id, checked: checked and self._refresh_settings_visibility()
+        )
+        self.run_confirmation_check.toggled.connect(self._refresh_settings_visibility)
+        return box
+
+    def _build_external_panel(self) -> QWidget:
+        panel = self._plain_container()
+        self.external_panel = panel
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 4, 0, 0)
+        top = QHBoxLayout()
+        external_button = QPushButton(tr("Load the separate data file"))
+        external_button.setObjectName("secondaryBtn")
+        self._tip(
+            external_button,
+            tr(
+                "A file that took no part in choosing the model. It is read only for the "
+                "single final score."
+            ),
+        )
+        external_button.clicked.connect(self.browse_external_dataset)
+        self.external_dataset_label = self._hint(tr("No separate file loaded yet"))
+        top.addWidget(external_button)
+        top.addWidget(self.external_dataset_label, 1)
+        layout.addLayout(top)
+        form = self._compact_form()
+        self.external_observation_combo = QComboBox()
+        self.external_observation_combo.addItem(tr("Use the external row position"), None)
+        self._form_row(
+            form, tr("Row ID in that file (optional)"), self.external_observation_combo,
+            tr(
+                "A column that identifies each row of the separate file. It is only used "
+                "to line rows up in the report, never as a model input."
+            ),
+        )
+        layout.addLayout(form)
+        self.external_mapping_tree = QTreeWidget()
+        self.external_mapping_tree.setColumnCount(2)
+        self.external_mapping_tree.setHeaderLabels(
+            (tr("Column in this data"), tr("Matching column in the separate file"))
+        )
+        self._tip(
+            self.external_mapping_tree,
+            tr(
+                "Pick, for every input and target, the matching column of the separate "
+                "file. Every one must be mapped."
+            ),
+        )
+        self.external_mapping_tree.setMinimumHeight(130)
+        self.external_mapping_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        layout.addWidget(self.external_mapping_tree)
+        layout.addWidget(
+            self._hint(
                 tr(
-                    "Ticking this adds the model to every compatible Experiment. More "
-                    "models means more total run time."
-                ),
-            )
-            if not capability.enabled:
-                model_explanation += " " + tr(
-                    "Currently unavailable: {reason}", reason=capability.reason
+                    "The separate file's targets are read only after the best model has "
+                    "been chosen and frozen."
                 )
-            self._help_control(check, model_explanation, append_question=True)
-            self.model_checks[capability.model_id] = check
-            models_layout.addWidget(check, index // 2, index % 2)
-        layout.addWidget(models_box, 0, 1)
+            )
+        )
+        return panel
 
-        advanced = QGroupBox(
-            tr("Advanced training settings (a preset only fills in defaults; every field stays editable)")
-            + f" {HELP_GLYPH}"
-        )
-        advanced.setToolTip(
-            tr(
-                "Controls neural training, repetitions and feature scaling. Run preset is "
-                "the only preset that immediately rewrites some of these values."
-            )
-        )
-        advanced_form = QFormLayout(advanced)
+    def _build_models_box(self) -> QWidget:
+        box = QGroupBox(tr("2 · Models to compare"))
+        layout = QVBoxLayout(box)
+        layout.setSpacing(4)
+        quick = QHBoxLayout()
+        for text, mode in (
+            (tr("Recommended"), "recommended"),
+            (tr("All available"), "all"),
+            (tr("None"), "none"),
+        ):
+            button = QPushButton(text)
+            button.setObjectName("secondaryBtn")
+            button.clicked.connect(lambda _checked=False, value=mode: self._quick_select_models(value))
+            quick.addWidget(button)
+        quick.addStretch(1)
+        self.model_count_label = self._hint()
+        quick.addWidget(self.model_count_label)
+        layout.addLayout(quick)
+
+        helps = model_help()
+        registry = {capability.model_id: capability for capability in model_registry()}
+        listed = {model_id for _title, ids in MODEL_SECTIONS for model_id in ids}
+        sections = [*MODEL_SECTIONS]
+        leftovers = tuple(model_id for model_id in registry if model_id not in listed)
+        if leftovers:
+            sections.append(("Other", leftovers))
+        for title, ids in sections:
+            capabilities = [registry[model_id] for model_id in ids if model_id in registry]
+            if not capabilities:
+                continue
+            header = QLabel(tr(title))
+            header.setObjectName("sectionTitle")
+            layout.addWidget(header)
+            grid = QGridLayout()
+            grid.setContentsMargins(8, 0, 0, 2)
+            grid.setHorizontalSpacing(12)
+            grid.setVerticalSpacing(2)
+            for index, capability in enumerate(capabilities):
+                check = QCheckBox(capability.display_name)
+                check.setEnabled(capability.enabled)
+                check.setChecked(capability.enabled and capability.model_id in DEFAULT_MODEL_IDS)
+                explanation = helps.get(
+                    capability.model_id,
+                    tr("Adds this model to every compatible combination."),
+                )
+                if not capability.enabled:
+                    check.setText(tr("{name} (not installed)", name=capability.display_name))
+                    explanation += " " + tr(
+                        "Currently unavailable: {reason}", reason=capability.reason
+                    )
+                self._tip(check, explanation)
+                check.toggled.connect(self._refresh_settings_visibility)
+                self.model_checks[capability.model_id] = check
+                grid.addWidget(check, index // 3, index % 3)
+            layout.addLayout(grid)
+        return box
+
+    def _build_neural_box(self) -> QWidget:
+        box = QGroupBox(tr("3 · Neural-network training"))
+        layout = QVBoxLayout(box)
+        layout.setSpacing(4)
+        self.neural_status_label = self._hint()
+        layout.addWidget(self.neural_status_label)
+        self.neural_settings = self._plain_container()
+        form = self._compact_form()
+        self.neural_form = form
+        self.neural_settings.setLayout(form)
+
         self.run_preset_combo = QComboBox()
-        self.run_preset_combo.addItem("Economy", "economy")
-        self.run_preset_combo.addItem("Balanced", "balanced")
-        self.run_preset_combo.addItem("Rigorous", "rigorous")
-        self.run_preset_combo.addItem("Custom", "custom")
-        preset_help = {
-            "economy": tr(
-                "Quick look: fewer epochs, less patience and fewer repetitions. Saves "
-                "time, with less stable results."
+        for label, value in (
+            (tr("Quick"), "economy"),
+            (tr("Balanced"), "balanced"),
+            (tr("Thorough"), "rigorous"),
+            (tr("Custom"), "custom"),
+        ):
+            self.run_preset_combo.addItem(label, value)
+        self.run_preset_combo.setCurrentIndex(1)
+        self.epochs_spin = self._int_spin(1, 1_000_000, 500)
+        self.patience_spin = self._int_spin(1, 100_000, 30, suffix=tr(" epochs"))
+        self.batch_spin = self._int_spin(2, 100_000, 32)
+        self.learning_rate_spin = self._float_spin(1e-7, 1.0, 0.001, step=0.0005, decimals=5)
+        self.validation_spin = self._float_spin(5.0, 50.0, 20.0, step=5.0, decimals=0, suffix=" %")
+        self.model_size_combo = QComboBox()
+        self.model_size_combo.addItem(tr("Auto — grows with the training rows"), "auto")
+        self.model_size_combo.addItem(tr("Fixed"), "fixed")
+        self.model_multiplier_spin = self._float_spin(0.10, 20.0, 1.0, step=0.25, suffix=" ×")
+        self.model_size_hint = self._hint()
+        loss_row = self._plain_container()
+        loss_layout = QHBoxLayout(loss_row)
+        loss_layout.setContentsMargins(0, 0, 0, 0)
+        loss_texts = loss_help()
+        for loss_id, label, checked in (
+            ("mse", "MSE", True),
+            ("huber", "Huber", True),
+            ("mae", "MAE", False),
+            ("log_cosh", "Log-cosh", False),
+        ):
+            check = QCheckBox(label)
+            check.setChecked(checked)
+            self._tip(check, loss_texts[loss_id])
+            check.toggled.connect(self._refresh_settings_visibility)
+            self.loss_checks[loss_id] = check
+            loss_layout.addWidget(check)
+        loss_layout.addStretch(1)
+
+        self._form_row(
+            form, tr("Preset"), self.run_preset_combo,
+            tr(
+                "Fills in Max epochs and Patience. Quick 250/20, Balanced 500/30, "
+                "Thorough 2000/60. Editing either value switches to Custom."
             ),
-            "balanced": tr(
-                "Balanced: moderate epochs and patience with 3 repetitions, trading time "
-                "against stability."
+        )
+        self._form_row(
+            form, tr("Max epochs"), self.epochs_spin,
+            tr(
+                "Upper limit on passes over the training rows. Training usually stops "
+                "earlier through early stopping."
             ),
-            "rigorous": tr(
-                "Rigorous: more epochs, more patience, wider models and 5 repetitions. "
-                "Substantially more compute."
+        )
+        self._form_row(
+            form, tr("Patience"), self.patience_spin,
+            tr(
+                "Stop when the early-stopping score has not improved for this many epochs, "
+                "and keep the best epoch."
             ),
-            "custom": tr("Custom: rewrites nothing and keeps your current settings."),
-        }
-        for index in range(self.run_preset_combo.count()):
-            self.run_preset_combo.setItemData(
-                index,
-                preset_help[self.run_preset_combo.itemData(index)],
-                Qt.ItemDataRole.ToolTipRole,
-            )
-        self.epochs_spin = QSpinBox(); self.epochs_spin.setRange(1, 1_000_000); self.epochs_spin.setValue(500)
-        self.patience_spin = QSpinBox(); self.patience_spin.setRange(1, 100_000); self.patience_spin.setValue(30)
-        self.batch_spin = QSpinBox(); self.batch_spin.setRange(2, 100_000); self.batch_spin.setValue(32)
-        self.learning_rate_spin = QDoubleSpinBox(); self.learning_rate_spin.setDecimals(7); self.learning_rate_spin.setRange(1e-7, 1.0); self.learning_rate_spin.setValue(0.001)
-        self.model_multiplier_spin = QDoubleSpinBox(); self.model_multiplier_spin.setRange(0.10, 20.0); self.model_multiplier_spin.setSingleStep(0.25); self.model_multiplier_spin.setValue(1.0)
-        self.repetitions_spin = QSpinBox(); self.repetitions_spin.setRange(1, 1000); self.repetitions_spin.setValue(1)
-        self.validation_spin = QDoubleSpinBox(); self.validation_spin.setRange(0.05, 0.50); self.validation_spin.setSingleStep(0.05); self.validation_spin.setValue(0.20)
-        scaler_row = QWidget(); scaler_layout = QHBoxLayout(scaler_row); scaler_layout.setContentsMargins(0, 0, 0, 0)
+        )
+        self._form_row(
+            form, tr("Batch size"), self.batch_spin,
+            tr("Rows per weight update. Smaller is noisier, larger is faster."),
+        )
+        self._form_row(
+            form, tr("Learning rate"), self.learning_rate_spin,
+            tr("Step size of each weight update. Too large is unstable, too small is slow."),
+        )
+        self._form_row(
+            form, tr("Early-stopping share"), self.validation_spin,
+            tr(
+                "Share of each training part watched for early stopping. It is taken from "
+                "the training rows only; test rows are never used."
+            ),
+        )
+        self._form_row(
+            form, tr("Model size"), self.model_size_combo,
+            tr(
+                "Auto scales network width with the square root of the real training rows "
+                "(500 rows = preset width, clipped to ×0.5–×3). Fixed always uses the "
+                "preset width times the size factor."
+            ),
+        )
+        self.model_multiplier_label = self._form_row(
+            form, tr("Size factor"), self.model_multiplier_spin,
+            tr("Multiplies the network width. In Auto mode it multiplies the automatic size."),
+        )
+        form.addRow(self.model_size_hint)
+        self.loss_label = self._form_row(
+            form, tr("Loss functions"), loss_row,
+            tr(
+                "How a network measures its error while training. Each extra tick trains "
+                "every network once more. Huber is a good choice for noisy measurements."
+            ),
+        )
+        layout.addWidget(self.neural_settings)
+
+        self._preset_guard = False
+        self.run_preset_combo.currentIndexChanged.connect(self._apply_run_preset)
+        self.epochs_spin.valueChanged.connect(self._mark_preset_custom)
+        self.patience_spin.valueChanged.connect(self._mark_preset_custom)
+        self.model_size_combo.currentIndexChanged.connect(self._refresh_settings_visibility)
+        self.model_multiplier_spin.valueChanged.connect(self._refresh_settings_visibility)
+        return box
+
+    def _build_preparation_box(self) -> QWidget:
+        box = QGroupBox(tr("4 · Scaling and repeats"))
+        form = self._compact_form()
+        box.setLayout(form)
+        scaler_row = self._plain_container()
+        scaler_layout = QHBoxLayout(scaler_row)
+        scaler_layout.setContentsMargins(0, 0, 0, 0)
         scaler_help = {
             "standard": tr(
-                "Standard scaler: uses the training fold's mean and standard deviation to "
-                "reach roughly zero mean and unit scale. Suits most models."
+                "Standard: centre on the training mean and divide by the standard "
+                "deviation. Suits most models."
             ),
             "robust": tr(
-                "Robust scaler: scales by the median and interquartile range, so outliers "
-                "matter less."
+                "Robust: centre on the median and divide by the interquartile range, so "
+                "outliers matter less."
             ),
             "minmax": tr(
-                "MinMax scaler: scales into a fixed range using the training fold's "
-                "minimum and maximum. More sensitive to extreme values."
+                "MinMax: squeeze into 0–1 using the training minimum and maximum. "
+                "Sensitive to extreme values."
             ),
         }
         for scaler_id, label in (("standard", "Standard"), ("robust", "Robust"), ("minmax", "MinMax")):
             check = QCheckBox(label)
             check.setChecked(scaler_id == "standard")
-            self._help_control(check, scaler_help[scaler_id], append_question=True)
+            self._tip(check, scaler_help[scaler_id])
+            check.toggled.connect(self._refresh_settings_visibility)
             self.scaler_checks[scaler_id] = check
             scaler_layout.addWidget(check)
-        self._add_help_row(
-            advanced_form, tr("Run preset"), self.run_preset_combo,
+        scaler_layout.addStretch(1)
+        self._form_row(
+            form, tr("Scaling"), scaler_row,
             tr(
-                "The one real parameter preset: choosing Economy, Balanced or Rigorous "
-                "immediately rewrites epochs, patience, repetitions, validation ratio and "
-                "model multiplier. Nothing else changes."
+                "How inputs and targets are rescaled, learned from the training part of "
+                "each fold only. Every ticked option is compared as its own configuration."
             ),
         )
-        self._add_help_row(
-            advanced_form, tr("Epochs"), self.epochs_spin,
+        self.repetitions_spin = self._int_spin(1, 1000, 1, suffix=" ×")
+        self.repetitions_spin.valueChanged.connect(self._refresh_settings_visibility)
+        self._form_row(
+            form, tr("Repeat each model"), self.repetitions_spin,
             tr(
-                "How many complete passes over the training data a neural model may make. "
-                "More can learn more, at the cost of time and overfitting risk."
+                "Trains every configuration again with a different random start and pools "
+                "the predictions. Reduces luck for random models; multiplies the run time."
             ),
         )
-        self._add_help_row(
-            advanced_form, tr("Early-stopping patience"), self.patience_spin,
-            tr(
-                "How many epochs without validation-loss improvement to allow before "
-                "stopping. Larger waits longer; smaller may stop too early."
-            ),
-        )
-        self._add_help_row(
-            advanced_form, tr("Batch size"), self.batch_spin,
-            tr(
-                "How many training rows each gradient update uses. Larger is usually "
-                "faster but needs more memory; smaller makes updates noisier."
-            ),
-        )
-        self._add_help_row(
-            advanced_form, tr("Learning rate"), self.learning_rate_spin,
-            tr(
-                "The step size the neural optimizer takes per weight update. Too large is "
-                "unstable; too small converges slowly."
-            ),
-        )
-        self._add_help_row(
-            advanced_form, tr("Model width multiplier"), self.model_multiplier_spin,
-            tr(
-                "Scales the neural hidden width up or down. Larger raises capacity, "
-                "memory use and overfitting risk together."
-            ),
-        )
-        self._add_help_row(
-            advanced_form, tr("Training repetitions"), self.repetitions_spin,
-            tr(
-                "Repeats every configuration with a different random initialization and "
-                "pools the predictions. Reduces luck, multiplies the time."
-            ),
-        )
-        self._add_help_row(
-            advanced_form, tr("Internal validation ratio"), self.validation_spin,
-            tr(
-                "Carves an early-stopping watch set out of the neural model's "
-                "fold-training partition only. Fold test data is never touched."
-            ),
-        )
-        self._help_control(
-            scaler_row,
-            tr(
-                "Tick one or more fold-local scalings. Each extra scaler adds a whole set "
-                "of model configurations."
-            ),
-        )
-        advanced_form.addRow(
-            self._help_label(
-                tr("Scalers"),
-                tr(
-                    "Controls how X and y are scaled inside each training fold. Every "
-                    "ticked scaler is trained and evaluated separately."
-                ),
-            ),
-            scaler_row,
-        )
-        self.run_preset_combo.currentIndexChanged.connect(self._apply_run_preset)
-        layout.addWidget(advanced, 1, 0)
+        return box
 
-        losses = QGroupBox(
-            tr("Loss functions (only for neural adapters that accept a custom loss)")
-            + f" {HELP_GLYPH}"
-        )
-        losses.setToolTip(
-            tr(
-                "The loss decides how a neural model measures prediction error while "
-                "training. Each extra tick adds one neural configuration."
-            )
-        )
-        loss_layout = QVBoxLayout(losses)
-        loss_texts = loss_help()
-        for loss_id, label, checked in (
-            ("mse", "MSE", True),
-            ("huber", tr("Huber / SmoothL1 (suggested for noisy measurements)"), True),
-            ("mae", "MAE / L1", False),
-            ("log_cosh", "Log-cosh", False),
-        ):
-            check = QCheckBox(label)
-            check.setChecked(checked)
-            self._help_control(check, loss_texts[loss_id], append_question=True)
-            self.loss_checks[loss_id] = check
-            loss_layout.addWidget(check)
-        loss_note = QLabel(
-            tr(
-                "Classical models use their own native objective, so ticking several "
-                "losses does not run them more than once."
-            )
-        )
-        loss_note.setWordWrap(True); loss_layout.addWidget(loss_note)
-        layout.addWidget(losses, 1, 1)
-
-        augmentation = CollapsibleSection(f"Augmentation policy {HELP_GLYPH}", expanded=False)
-        augmentation.toggle_button.setToolTip(
-            tr(
-                "Decides how synthetic training rows enter the comparison. Original only "
-                "ignores every ticked method."
-            )
-        )
-        self.augmentation_section = augmentation
-        aug_layout = QFormLayout()
-        augmentation.setContentLayout(aug_layout)
+    def _build_augmentation_section(self) -> QWidget:
+        section = CollapsibleSection(tr("5 · Synthetic training rows (optional)"), expanded=False)
+        self.augmentation_section = section
+        outer = QVBoxLayout()
+        outer.setSpacing(4)
+        section.setContentLayout(outer)
+        top = self._compact_form()
         self.augmentation_policy_combo = QComboBox()
+        self.augmentation_policy_combo.addItem(tr("Off — train on real rows only"), "original_only")
         self.augmentation_policy_combo.addItem(
-            tr("Original only (no augmentation)"), "original_only"
-        )
-        self.augmentation_policy_combo.addItem(
-            tr("Compare separately against the original data (suggested)"), "compare_separately"
+            tr("Compare each method against no augmentation"), "compare_separately"
         )
         self.augmentation_policy_combo.addItem(tr("Combine the ticked methods"), "combined")
-        policy_help = {
-            "original_only": tr(
-                "Builds the Original configuration only. Your method ticks are kept but "
-                "completely ignored at run time."
-            ),
-            "compare_separately": tr(
-                "Builds Original plus one separate configuration per ticked method, so you "
-                "can see directly whether each method improves the result."
-            ),
-            "combined": tr(
-                "Builds Original plus one configuration combining every ticked method. "
-                "Tests the combination, but cannot attribute the effect to one method."
-            ),
-        }
-        for index in range(self.augmentation_policy_combo.count()):
-            self.augmentation_policy_combo.setItemData(
-                index,
-                policy_help[self.augmentation_policy_combo.itemData(index)],
-                Qt.ItemDataRole.ToolTipRole,
-            )
-        self._add_help_row(
-            aug_layout, tr("Policy"), self.augmentation_policy_combo,
+        self._form_row(
+            top, tr("Mode"), self.augmentation_policy_combo,
             tr(
-                "Controls how augmentation configurations expand: Original only skips "
-                "augmentation, Separate compares each method on its own, Combined applies "
-                "them together."
+                "Synthetic rows are made only from the training part of each fold, so they "
+                "can never leak into the score. 'Compare' trains one extra configuration per "
+                "method; 'Combine' trains one with all methods together."
             ),
         )
-        method_widget = QWidget(); method_layout = QGridLayout(method_widget); method_layout.setContentsMargins(0, 0, 0, 0)
+        outer.addLayout(top)
+
+        self.augmentation_details = self._plain_container()
+        details = QVBoxLayout(self.augmentation_details)
+        details.setContentsMargins(0, 0, 0, 0)
+        method_grid = QGridLayout()
+        method_grid.setHorizontalSpacing(12)
+        method_grid.setVerticalSpacing(2)
         methods = (
             ("c_mixup", tr("C-Mixup (target-aware)")),
             ("calibrated_noise", tr("Calibrated feature noise")),
             ("spectral_perturbation", tr("Spectral perturbation (needs a valid wavelength axis)")),
             ("feature_masking", tr("Training-time feature masking")),
-            ("foma", "FOMA (First-Order Manifold Data Augmentation)"),
+            ("foma", "FOMA"),
         )
         augmentation_texts = augmentation_help()
         for index, (method_id, label) in enumerate(methods):
             check = QCheckBox(label)
-            self._help_control(check, augmentation_texts[method_id], append_question=True)
+            self._tip(check, augmentation_texts[method_id])
+            check.toggled.connect(self._refresh_settings_visibility)
             self.augmentation_checks[method_id] = check
-            method_layout.addWidget(check, index // 2, index % 2)
-        self._help_control(
-            method_widget,
-            tr(
-                "Choose which training-only augmentations to generate. Policy decides "
-                "whether they are compared separately or combined."
-            ),
-        )
-        aug_layout.addRow(
-            self._help_label(
-                tr("Methods"),
-                tr(
-                    "Tick augmentation algorithms. Under Original only they are all "
-                    "ignored; under Separate each is compared on its own; under Combined "
-                    "they are applied together."
-                ),
-            ),
-            method_widget,
-        )
-        self.augmentation_repeats_spin = QSpinBox(); self.augmentation_repeats_spin.setRange(1, 100); self.augmentation_repeats_spin.setValue(1)
-        self.augmentation_ratio_spin = QDoubleSpinBox(); self.augmentation_ratio_spin.setRange(0.05, 5.0); self.augmentation_ratio_spin.setSingleStep(0.25); self.augmentation_ratio_spin.setValue(0.50)
+            method_grid.addWidget(check, index // 2, index % 2)
+        details.addLayout(method_grid)
+        form = self._compact_form()
+        self.augmentation_form = form
+        self.augmentation_ratio_spin = self._float_spin(0.05, 5.0, 0.50, step=0.25)
+        self.augmentation_repeats_spin = self._int_spin(1, 100, 1, suffix=" ×")
         self.augmentation_include_original_check = QCheckBox(
-            tr("Include the original rows in the augmented training set")
+            tr("Keep the real rows in the training set")
         )
         self.augmentation_include_original_check.setChecked(True)
-        self.c_mixup_alpha_spin = QDoubleSpinBox(); self.c_mixup_alpha_spin.setRange(0.05, 20.0); self.c_mixup_alpha_spin.setValue(2.0)
-        self.noise_fraction_spin = QDoubleSpinBox(); self.noise_fraction_spin.setDecimals(4); self.noise_fraction_spin.setRange(0.0, 1.0); self.noise_fraction_spin.setValue(0.02)
-        self.feature_mask_probability_spin = QDoubleSpinBox(); self.feature_mask_probability_spin.setDecimals(3); self.feature_mask_probability_spin.setRange(0.0, 0.95); self.feature_mask_probability_spin.setValue(0.05)
-        self.foma_alpha_spin = QDoubleSpinBox(); self.foma_alpha_spin.setRange(0.05, 20.0); self.foma_alpha_spin.setValue(2.0)
-        self.foma_k_spin = QSpinBox(); self.foma_k_spin.setRange(1, 10_000); self.foma_k_spin.setValue(1)
-        self._add_help_row(
-            aug_layout, tr("Synthetic rows / train rows"), self.augmentation_ratio_spin,
+        self.c_mixup_alpha_spin = self._float_spin(0.05, 20.0, 2.0, step=0.5)
+        self.noise_fraction_spin = self._float_spin(0.0, 1.0, 0.02, step=0.01, decimals=4)
+        self.feature_mask_probability_spin = self._float_spin(0.0, 0.95, 0.05, step=0.05, decimals=3)
+        self.foma_alpha_spin = self._float_spin(0.05, 20.0, 2.0, step=0.5)
+        self.foma_k_spin = self._int_spin(1, 10_000, 1)
+        self._form_row(
+            form, tr("Synthetic rows per real row"), self.augmentation_ratio_spin,
+            tr("0.5 adds about half as many synthetic rows as there are training rows."),
+        )
+        self._form_row(
+            form, tr("Multiply that by"), self.augmentation_repeats_spin,
             tr(
-                "How many synthetic rows each augmentation produces relative to the "
-                "fold-training rows. 0.5 means about half as many."
+                "Repeats the synthetic-row generation. More rows and more time; this is not "
+                "the same as repeating a model."
             ),
         )
-        self._add_help_row(
-            aug_layout, tr("Augmentation repeats"), self.augmentation_repeats_spin,
-            tr(
-                "Multiplies the synthetic row count again. More data and more training "
-                "time — this is not the same as model training repetitions."
-            ),
-        )
-        self._help_control(
+        self._tip(
             self.augmentation_include_original_check,
             tr(
-                "When ticked, an augmented variant trains on the original rows plus the "
-                "synthetic ones. When cleared, that variant uses synthetic rows only; the "
-                "Original baseline is kept either way."
-            ),
-            append_question=True,
-        )
-        aug_layout.addRow(self.augmentation_include_original_check)
-        self._add_help_row(
-            aug_layout, tr("C-Mixup alpha"), self.c_mixup_alpha_spin,
-            tr(
-                "The Beta distribution shape parameter controlling the interpolation "
-                "weight between two rows. Larger mixes closer to the middle; smaller stays "
-                "closer to one of them."
+                "Ticked: train on real plus synthetic rows. Cleared: synthetic rows only. "
+                "The no-augmentation baseline is always trained as well."
             ),
         )
-        self._add_help_row(
-            aug_layout, tr("Noise fraction"), self.noise_fraction_spin,
+        form.addRow(self.augmentation_include_original_check)
+        self._form_row(
+            form, tr("C-Mixup alpha"), self.c_mixup_alpha_spin,
             tr(
-                "Calibrated noise as a fraction of the training feature's standard "
-                "deviation. Larger perturbs more, and is more likely to leave the "
-                "plausible measurement range."
+                "Shape of the mixing weight between two rows. Larger mixes closer to the "
+                "middle; smaller stays close to one of the two rows."
             ),
         )
-        self._add_help_row(
-            aug_layout, tr("Mask probability"), self.feature_mask_probability_spin,
-            tr(
-                "The chance that each training feature is masked to its scaled mean. "
-                "Larger regularizes harder, and can discard too much information."
-            ),
+        self._form_row(
+            form, tr("Noise level"), self.noise_fraction_spin,
+            tr("Noise as a fraction of each feature's standard deviation."),
         )
-        self._add_help_row(
-            aug_layout, tr("FOMA alpha"), self.foma_alpha_spin,
-            tr(
-                "The Beta scaling coefficient FOMA applies to non-leading singular "
-                "components. Larger favours moderate scaling; smaller more often either "
-                "preserves or strongly compresses them."
-            ),
+        self._form_row(
+            form, tr("Mask probability"), self.feature_mask_probability_spin,
+            tr("Chance that each feature is blanked to its mean in a synthetic row."),
         )
-        self._add_help_row(
-            aug_layout, tr("FOMA retained components (k)"), self.foma_k_spin,
-            tr(
-                "How many leading joint X/y SVD components FOMA keeps intact. A larger k "
-                "preserves more of the data's main structure and perturbs more "
-                "conservatively."
-            ),
+        self._form_row(
+            form, tr("FOMA alpha"), self.foma_alpha_spin,
+            tr("Beta shape of the scaling applied to the minor joint X/y directions."),
         )
-        self.augmentation_policy_description_label = QLabel()
-        self.augmentation_policy_description_label.setWordWrap(True)
-        self.augmentation_policy_description_label.setStyleSheet("color: #315a7d; padding: 4px;")
-        aug_layout.addRow(self.augmentation_policy_description_label)
-        aug_note = QLabel(
-            tr(
-                "Every method acts only on the current fold's training partition, and the "
-                "Original baseline is always kept. Bootstrap is not counted as "
-                "augmentation; SMOGN needs a target relevance definition first, so this "
-                "version offers no blind switch for it."
+        self._form_row(
+            form, tr("FOMA kept components (k)"), self.foma_k_spin,
+            tr("How many leading joint X/y directions FOMA leaves untouched."),
+        )
+        details.addLayout(form)
+        details.addWidget(
+            self._hint(
+                tr(
+                    "Synthetic rows cannot add information the real rows do not have. They "
+                    "only help when they encode a real measurement tolerance."
+                )
             )
         )
-        aug_note.setWordWrap(True)
-        aug_layout.addRow(aug_note)
-        self.augmentation_detail_controls = (
-            *self.augmentation_checks.values(),
-            self.augmentation_ratio_spin,
-            self.augmentation_repeats_spin,
-            self.augmentation_include_original_check,
-            self.c_mixup_alpha_spin,
-            self.noise_fraction_spin,
-            self.feature_mask_probability_spin,
-            self.foma_alpha_spin,
-            self.foma_k_spin,
-        )
+        outer.addWidget(self.augmentation_details)
         self.augmentation_policy_combo.currentIndexChanged.connect(
-            self._update_augmentation_controls
+            self._refresh_settings_visibility
         )
-        layout.addWidget(augmentation, 2, 0, 1, 2)
+        return section
 
-        external = CollapsibleSection(f"External Validation dataset mapping {HELP_GLYPH}", expanded=False)
-        external.toggle_button.setToolTip(
-            tr(
-                "For the External Validation strategy only: map each development column to "
-                "the independent external data. The external target is read only after the "
-                "model has been selected."
-            )
-        )
-        self.external_validation_section = external
-        external_layout = QVBoxLayout()
-        external.setContentLayout(external_layout)
-        external_top = QHBoxLayout()
-        external_button = QPushButton(tr("Load independent external data") + f" {HELP_GLYPH}")
-        self._help_control(
-            external_button,
-            tr(
-                "Loads a fully independent file that took no part in development "
-                "selection. Used for exactly one final evaluation under the External "
-                "Validation strategy."
-            ),
-        )
-        external_button.clicked.connect(self.browse_external_dataset)
-        self.external_dataset_label = QLabel(
-            tr("Not loaded; used by the External Validation strategy only")
-        )
-        external_top.addWidget(external_button)
-        external_top.addWidget(self.external_dataset_label, 1)
-        external_layout.addLayout(external_top)
-        self.external_observation_combo = QComboBox()
-        self.external_observation_combo.addItem(tr("Use the external row position"), None)
-        external_layout.addWidget(self._help_label(
-            tr("External Observation ID (optional)"),
-            tr(
-                "The column that uniquely identifies each external observation. Without "
-                "one, rows are aligned by position and the report says so."
-            ),
-        ))
-        self._help_control(
-            self.external_observation_combo,
-            tr(
-                "Names the external observation identifier. It is used for tracking and "
-                "alignment only, never as a model input feature."
-            ),
-        )
-        external_layout.addWidget(self.external_observation_combo)
-        self.external_mapping_tree = QTreeWidget()
-        self.external_mapping_tree.setColumnCount(2)
-        self.external_mapping_tree.setHeaderLabels(
-            (
-                tr("Development column") + f" {HELP_GLYPH}",
-                tr("External column") + f" {HELP_GLYPH}",
-            )
-        )
-        self._help_control(
-            self.external_mapping_tree,
-            tr(
-                "The left column lists what the model was built on; pick the matching "
-                "external column on the right. Every input and target must be mapped "
-                "explicitly."
-            ),
-        )
-        self.external_mapping_tree.setMinimumHeight(150)
-        self.external_mapping_tree.header().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        external_layout.addWidget(self.external_mapping_tree)
-        external_note = QLabel(
-            tr(
-                "Every model feature and target must be mapped explicitly. The external "
-                "target is not read until development CV and Confirmation have finished "
-                "and the winning configuration is frozen."
-            )
-        )
-        external_note.setWordWrap(True)
-        external_layout.addWidget(external_note)
-        layout.addWidget(external, 3, 0, 1, 2)
-
-        output = QGroupBox(tr("Output") + f" {HELP_GLYPH}")
-        output.setToolTip(
-            tr(
-                "The parent folder for every result, figure, Markdown file, PDF and final "
-                "model bundle."
-            )
-        )
-        output_form = QFormLayout(output)
-        out_row = QHBoxLayout()
+    def _build_output_box(self) -> QWidget:
+        box = QGroupBox(tr("6 · Output"))
+        form = self._compact_form()
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.ExpandingFieldsGrow)
+        box.setLayout(form)
+        folder_row = self._plain_container()
+        out_row = QHBoxLayout(folder_row)
+        out_row.setContentsMargins(0, 0, 0, 0)
         self.output_edit = QLineEdit(str(DEFAULT_OUTPUT_ROOT))
-        self._help_control(
-            self.output_edit,
-            tr(
-                "The parent report folder. Each run creates its own timestamped subfolder "
-                "inside it, so earlier results are never overwritten."
-            ),
-        )
-        choose = QPushButton(tr("Browse") + f" {HELP_GLYPH}")
-        self._help_control(
-            choose, tr("Opens a folder picker and fills in the Master report folder.")
-        )
+        choose = QPushButton(tr("Browse"))
+        choose.setObjectName("secondaryBtn")
         choose.clicked.connect(self.choose_output_folder)
         out_row.addWidget(self.output_edit, 1)
         out_row.addWidget(choose)
-        output_form.addRow(
-            self._help_label(
-                tr("Master report folder"),
-                tr(
-                    "The parent directory for every Benchmark Run. Each run creates a "
-                    "run_<date>_<time>_<microseconds> subfolder, and never moves or "
-                    "overwrites earlier results."
-                ),
+        self._form_row(
+            form, tr("Report folder"), folder_row,
+            tr(
+                "Each run creates its own run_<date>_<time> subfolder here, so earlier "
+                "results are never overwritten."
             ),
-            out_row,
         )
         self.run_name_edit = QLineEdit()
-        self.run_name_edit.setPlaceholderText(
-            tr("e.g. shrimp qPCR first pass (blank uses the folder name)")
+        self.run_name_edit.setPlaceholderText(tr("e.g. NH3 first pass (blank uses the folder name)"))
+        self._form_row(
+            form, tr("Run name"), self.run_name_edit,
+            tr("Written into every kept model, and shown on the Model library tab."),
         )
-        self._add_help_row(
-            output_form,
-            tr("Run name"),
-            self.run_name_edit,
-            tr(
-                "This name is written into every retained model's metadata, and is what "
-                "tells training batches with different purposes apart on the Model library "
-                "tab."
-            ),
-        )
-        keep_note = QLabel(
-            tr(
-                "Only the top {limit} models per Target Task are kept. A model whose "
-                "Reported R² is not above 0 is never saved, including the first-ranked one.",
-                limit=MODEL_KEEP_LIMIT,
+        form.addRow(
+            self._hint(
+                tr(
+                    "Only the top {limit} models per target are saved, and only if their R² "
+                    "is above 0 (better than always predicting the mean).",
+                    limit=MODEL_KEEP_LIMIT,
+                )
             )
         )
-        keep_note.setWordWrap(True)
-        output_form.addRow(keep_note)
-        layout.addWidget(output, 4, 0, 1, 2)
-        self._update_augmentation_controls()
-        self._update_strategy_controls()
-        return tab
+        return box
+
+    # ------------------------------------------------- settings behaviour
+    def _current_strategy(self) -> EvaluationStrategy:
+        for strategy, button in self.strategy_buttons.items():
+            if button.isChecked():
+                return strategy
+        return EvaluationStrategy.NESTED_CV
+
+    def _quick_select_models(self, mode: str) -> None:
+        for model_id, check in self.model_checks.items():
+            if not check.isEnabled():
+                continue
+            if mode == "all":
+                check.setChecked(True)
+            elif mode == "none":
+                check.setChecked(False)
+            else:
+                check.setChecked(model_id in RECOMMENDED_MODEL_IDS)
 
     def _apply_run_preset(self) -> None:
-        preset = self.run_preset_combo.currentData()
         values = {
-            "economy": (250, 20, 1, 0.20, 1.0),
-            "balanced": (500, 30, 3, 0.20, 1.0),
-            "rigorous": (2000, 60, 5, 0.20, 1.25),
-        }.get(preset)
+            "economy": (250, 20),
+            "balanced": (500, 30),
+            "rigorous": (2000, 60),
+        }.get(self.run_preset_combo.currentData())
         if values:
-            epochs, patience, repetitions, validation, multiplier = values
-            self.epochs_spin.setValue(epochs); self.patience_spin.setValue(patience)
-            self.repetitions_spin.setValue(repetitions); self.validation_spin.setValue(validation)
-            self.model_multiplier_spin.setValue(multiplier)
+            self._preset_guard = True
+            self.epochs_spin.setValue(values[0])
+            self.patience_spin.setValue(values[1])
+            self._preset_guard = False
+
+    def _mark_preset_custom(self, *_args: object) -> None:
+        if self._preset_guard:
+            return
+        expected = {
+            "economy": (250, 20),
+            "balanced": (500, 30),
+            "rigorous": (2000, 60),
+        }.get(self.run_preset_combo.currentData())
+        if expected and expected != (self.epochs_spin.value(), self.patience_spin.value()):
+            self.run_preset_combo.blockSignals(True)
+            self.run_preset_combo.setCurrentIndex(self.run_preset_combo.findData("custom"))
+            self.run_preset_combo.blockSignals(False)
+
+    def _selected_model_ids(self) -> list[str]:
+        return [
+            model_id
+            for model_id, check in self.model_checks.items()
+            if check.isEnabled() and check.isChecked()
+        ]
+
+    def _typical_training_rows(self) -> int | None:
+        records = self.catalog.selected_records or self.catalog.records
+        rows = max((record.valid_rows for record in records), default=0)
+        if not rows:
+            return None
+        strategy = self._current_strategy()
+        if strategy == EvaluationStrategy.HOLDOUT:
+            return max(1, round(rows * (1 - self.test_spin.value() / 100.0)))
+        if strategy == EvaluationStrategy.TRAIN_FINAL_ONLY:
+            return rows
+        folds = self.folds_spin.value()
+        return max(1, round(rows * (folds - 1) / folds))
 
     def _update_augmentation_controls(self, *_args: object) -> None:
-        """Expose policy precedence without destroying the user's method selections."""
-        policy = self.augmentation_policy_combo.currentData()
-        uses_augmentation = policy != "original_only"
-        for control in self.augmentation_detail_controls:
-            control.setEnabled(uses_augmentation)
-        descriptions = {
-            "original_only": tr(
-                "Right now only Original runs: every ticked method and its parameters are "
-                "ignored. Your ticks are kept, so switching policy resumes them."
-            ),
-            "compare_separately": tr(
-                "Right now this builds the Original baseline plus one configuration per "
-                "ticked method. The methods are never mixed."
-            ),
-            "combined": tr(
-                "Right now this builds the Original baseline plus one configuration "
-                "combining every ticked method. The report can judge the combination as a "
-                "whole, but cannot attribute the effect to one method."
-            ),
-        }
-        self.augmentation_policy_description_label.setText(descriptions.get(policy, ""))
-        if hasattr(self, "confirmation_controls"):
-            self._update_strategy_controls()
+        """Kept for callers of the old name; visibility now lives in one place."""
+
+        self._refresh_settings_visibility()
 
     def _update_strategy_controls(self, *_args: object) -> None:
-        """Show which settings participate in the selected evidence workflow."""
-        strategy = self.strategy_combo.currentData()
-        cv_strategy = strategy in {
-            EvaluationStrategy.NESTED_CV,
-            EvaluationStrategy.EXTERNAL_VALIDATION,
-        }
+        self._refresh_settings_visibility()
+
+    def _refresh_settings_visibility(self, *_args: object) -> None:
+        """Show only the settings the current choices actually use."""
+
+        if not getattr(self, "_settings_ready", False):
+            return
+        strategy = self._current_strategy()
+        cv = strategy in {EvaluationStrategy.NESTED_CV, EvaluationStrategy.EXTERNAL_VALIDATION}
         holdout = strategy == EvaluationStrategy.HOLDOUT
         final_only = strategy == EvaluationStrategy.TRAIN_FINAL_ONLY
-        external = strategy == EvaluationStrategy.EXTERNAL_VALIDATION
+        form = self.strategy_form
+        form.setRowVisible(self.folds_spin, cv)
+        form.setRowVisible(self.test_spin, holdout)
+        form.setRowVisible(self.chronological_check, holdout)
+        form.setRowVisible(self.seed_spin, True)
+        form.setRowVisible(self.refit_check, not final_only)
+        form.setRowVisible(self.run_confirmation_check, cv)
+        self.confirmation_panel.setVisible(cv and self.run_confirmation_check.isChecked())
+        self.external_panel.setVisible(strategy == EvaluationStrategy.EXTERNAL_VALIDATION)
+        self.strategy_description_label.setText(self.strategy_descriptions.get(strategy, ""))
 
-        self.test_spin.setEnabled(holdout)
-        self.folds_spin.setEnabled(cv_strategy)
-        self.run_confirmation_check.setEnabled(cv_strategy)
-        confirmation_enabled = cv_strategy and self.run_confirmation_check.isChecked()
-        for control in self.confirmation_controls:
-            control.setEnabled(confirmation_enabled)
-        if self.augmentation_policy_combo.currentData() == "original_only":
-            self.confirmation_aug_check.setEnabled(False)
-        self.refit_check.setEnabled(not final_only)
-        self.external_validation_section.setEnabled(external)
-
-        descriptions = {
-            EvaluationStrategy.NESTED_CV: tr(
-                "This is an evaluation workflow, not a preset. It uses Screening folds, "
-                "with optional Confirmation. Test ratio and External mapping are ignored; "
-                "every other training, model, loss and augmentation setting applies as "
-                "usual."
-            ),
-            EvaluationStrategy.HOLDOUT: tr(
-                "This is an evaluation workflow, not a preset. It uses Test ratio for one "
-                "Train/Test split. Screening folds, every Confirmation setting and "
-                "External mapping are ignored. At Test ratio = 0% it performs the final "
-                "fit only."
-            ),
-            EvaluationStrategy.EXTERNAL_VALIDATION: tr(
-                "This is an evaluation workflow, not a preset. It selects a configuration "
-                "on the development data with Screening folds and optional Confirmation, "
-                "then evaluates once through External mapping. Test ratio is ignored."
-            ),
-            EvaluationStrategy.TRAIN_FINAL_ONLY: tr(
-                "This is an evaluation workflow, not a preset. It trains the final models "
-                "straight from every development row. Test ratio, Screening folds, "
-                "Confirmation, External mapping and the refit option are all ignored, and "
-                "no generalization metric is produced."
-            ),
+        augmentation_on = self.augmentation_policy_combo.currentData() != "original_only"
+        self.confirmation_form.setRowVisible(self.confirmation_aug_check, augmentation_on)
+        self.augmentation_details.setVisible(augmentation_on)
+        per_method = {
+            self.c_mixup_alpha_spin: "c_mixup",
+            self.noise_fraction_spin: "calibrated_noise",
+            self.feature_mask_probability_spin: "feature_masking",
+            self.foma_alpha_spin: "foma",
+            self.foma_k_spin: "foma",
         }
-        self.strategy_description_label.setText(descriptions.get(strategy, ""))
+        for control, method in per_method.items():
+            self.augmentation_form.setRowVisible(control, self.augmentation_checks[method].isChecked())
+
+        selected = self._selected_model_ids()
+        neural = [model_id for model_id in selected if model_id in NEURAL_MODEL_IDS]
+        loss_models = [model_id for model_id in neural if model_id in LOSS_CONFIGURABLE_MODEL_IDS]
+        names = {capability.model_id: capability.display_name for capability in model_registry()}
+        self.neural_settings.setVisible(bool(neural))
+        if neural:
+            shown = ", ".join(names.get(model_id, model_id) for model_id in neural[:4])
+            if len(neural) > 4:
+                shown += tr(" and {count} more", count=len(neural) - 4)
+            self.neural_status_label.setText(tr("Used by: {models}", models=shown))
+        else:
+            self.neural_status_label.setText(
+                tr("No neural network is ticked, so none of these settings are used.")
+            )
+        self.neural_form.setRowVisible(self.loss_label, bool(loss_models))
+        auto = self.model_size_combo.currentData() == "auto"
+        self.model_multiplier_label.setText(tr("Extra size factor") if auto else tr("Size factor"))
+        rows = self._typical_training_rows()
+        if auto and rows:
+            scale = adaptive_capacity_scale(rows) * self.model_multiplier_spin.value()
+            self.model_size_hint.setText(
+                tr(
+                    "With about {rows} training rows, networks use ×{scale:.2f} of the preset width.",
+                    rows=rows,
+                    scale=scale,
+                )
+            )
+        elif auto:
+            self.model_size_hint.setText(
+                tr("The width is set per fold from the number of training rows.")
+            )
+        else:
+            self.model_size_hint.setText(
+                tr("Every fold uses ×{scale:.2f} of the preset width.", scale=self.model_multiplier_spin.value())
+            )
+        self.model_count_label.setText(
+            tr("{count} selected", count=len(selected))
+        )
+        self._refresh_group_status()
+        self._update_run_estimate()
+
+    def _update_run_estimate(self) -> None:
+        if not getattr(self, "_settings_ready", False):
+            return
+        records = self.catalog.selected_records
+        models = self._selected_model_ids()
+        if not records:
+            self.run_estimate_label.setText(
+                tr("Generate the combinations on the Data tab to see how large this run is.")
+            )
+            return
+        if not models:
+            self.run_estimate_label.setText(tr("Tick at least one model."))
+            return
+        try:
+            config = self.collect_config()
+        except Exception as exc:  # incomplete settings: say why instead of guessing
+            self.run_estimate_label.setText(tr("Settings incomplete: {reason}", reason=str(exc)))
+            return
+        if config.strategy in {EvaluationStrategy.NESTED_CV, EvaluationStrategy.EXTERNAL_VALIDATION}:
+            splits = config.screening_folds
+        else:
+            splits = 1
+        fits = 0
+        for record in records:
+            compatible = [
+                model_id
+                for model_id in models
+                if model_incompatibility_reason(
+                    model_id,
+                    record.input_columns,
+                    record.feature_structure.value,
+                    record.structure_confirmed,
+                )
+                is None
+            ]
+            fits += evaluation_run_count(compatible, config, splits, record)
+        text = tr(
+            "This run trains about {fits:,} models: {combos} combination(s) × {models} model(s) "
+            "× settings × {splits} split(s).",
+            fits=fits,
+            combos=len(records),
+            models=len(models),
+            splits=splits,
+        )
+        if config.run_confirmation:
+            text += " " + tr("The double-check stage adds many more.")
+        self.run_estimate_label.setText(text)
+
+    # ---------------------------------------------------------- grouping
+    def _group_column_name(self) -> str | None:
+        for (sheet, column), combo in self.column_role_boxes.items():
+            if combo.currentData() == "group_id":
+                return column
+        return None
+
+    def _refresh_group_status(self) -> None:
+        if not hasattr(self, "group_status_label"):
+            return
+        if self.bundle is None:
+            text, name = tr("Load data on the Data tab first."), "hint"
+        else:
+            column = self._group_column_name()
+            if column:
+                text = tr(
+                    "✓ Rows are grouped by “{column}”: rows of one group are never split "
+                    "between training and testing.",
+                    column=column,
+                )
+                name = "ok"
+            else:
+                text = tr(
+                    "⚠ No Group ID. If several rows come from the same day, tank or subject, "
+                    "set that column as Group ID on the Data tab — otherwise the score is "
+                    "too optimistic."
+                )
+                name = "warning"
+        for label in (self.group_status_label, getattr(self, "data_group_status_label", None)):
+            if label is None:
+                continue
+            label.setText(text)
+            label.setObjectName(name)
+            label.style().unpolish(label)
+            label.style().polish(label)
 
     def _build_run_tab(self) -> QWidget:
         tab = QWidget()
@@ -2324,9 +2487,7 @@ class TrainingPage(QWidget):
             self.bundle = FlexibleDatasetLoader().load(path)
             self.dataset_path = path
             self.external_bundle = None
-            self.external_dataset_label.setText(
-                tr("Not loaded; used by the External Validation strategy only")
-            )
+            self.external_dataset_label.setText(tr("No separate file loaded yet"))
             self._refresh_external_mapping()
             self.dataset_label.setText(path)
             self.legacy_specs = []
@@ -2344,6 +2505,15 @@ class TrainingPage(QWidget):
                     sheets=len(self.bundle.sheets),
                     rows=rows,
                 )
+                + (
+                    " "
+                    + tr(
+                        "⚠ {count} data check(s) flagged in the Audit column.",
+                        count=self.audit_flag_count,
+                    )
+                    if self.audit_flag_count
+                    else ""
+                )
             )
         except Exception as exc:
             QMessageBox.critical(self, tr("Could not load the data"), str(exc))
@@ -2356,6 +2526,7 @@ class TrainingPage(QWidget):
         self.column_role_boxes.clear()
         self.observation_ref = None
         self.group_ref = None
+        self.audit_flag_count = 0
         for sheet_name, loaded in self.bundle.sheets.items():
             profile = loaded.profile
             parent = QTreeWidgetItem((sheet_name, "", "Sheet", str(profile.cleaned_rows), str(profile.total_missing_cells), f"header={profile.header_detected}"))
@@ -2365,15 +2536,24 @@ class TrainingPage(QWidget):
                 sheet_combo.addItem(roles[value], value)
             self.role_tree.setItemWidget(parent, 1, sheet_combo)
             self.sheet_role_boxes[sheet_name] = sheet_combo
+            notes = self._column_audit_notes(loaded)
             for column_name, column in profile.column_profiles.items():
+                audit_text = f"unique={column.unique_values}; numeric={column.numeric_ratio:.1%}"
+                column_notes = notes.get(column_name, [])
+                if column_notes:
+                    audit_text = "⚠ " + "; ".join(column_notes) + " | " + audit_text
                 child = QTreeWidgetItem((
                     column_name,
                     "",
                     tr("numeric") if column.trainable else tr("ID / text candidate"),
                     str(profile.cleaned_rows),
                     str(column.missing),
-                    f"unique={column.unique_values}; numeric={column.numeric_ratio:.1%}",
+                    audit_text,
                 ))
+                if column_notes:
+                    child.setForeground(5, QColor("#f5a623"))
+                    child.setToolTip(5, "\n".join(column_notes))
+                    self.audit_flag_count += len(column_notes)
                 parent.addChild(child)
                 combo = QComboBox()
                 values = ["skip", "observation_id", "group_id"]
@@ -2388,8 +2568,43 @@ class TrainingPage(QWidget):
             parent.setExpanded(True)
         self._apply_identity_suggestions()
         self.role_tree.header().setSectionResizeMode(0, QHeaderView.ResizeMode.Interactive)
-        self.role_tree.setColumnWidth(0, 260)
-        self.role_tree.setColumnWidth(1, 220)
+        for column, width in enumerate((190, 185, 70, 50, 60)):
+            self.role_tree.setColumnWidth(column, width)
+        self._refresh_group_status()
+
+    @staticmethod
+    def _column_audit_notes(loaded: Any) -> dict[str, list[str]]:
+        """Translated data-health notes per column (see regression_v4.data_audit)."""
+
+        trainable = [
+            name for name, profile in loaded.profile.column_profiles.items() if profile.trainable
+        ]
+        if not trainable:
+            return {}
+        notes: dict[str, list[str]] = {}
+        for finding in audit_columns(loaded.data[trainable]):
+            if finding.kind == "outliers":
+                text = tr(
+                    "{count} extreme value(s), e.g. {value:g} — typo or another population?",
+                    count=finding.count,
+                    value=finding.value,
+                )
+            elif finding.kind == "constant":
+                text = tr("constant column — carries no information")
+            elif finding.kind == "multiple_of":
+                text = tr(
+                    "exactly {value:.4g} × {other} — the same information",
+                    value=finding.value,
+                    other=finding.other,
+                )
+            else:
+                text = tr(
+                    "ρ = {value:.2f} with {other} — nearly the same information",
+                    value=finding.value,
+                    other=finding.other,
+                )
+            notes.setdefault(finding.column, []).append(text)
+        return notes
 
     def _apply_identity_suggestions(self) -> None:
         """Conservatively protect obvious ID columns from accidental feature use."""
@@ -2399,7 +2614,14 @@ class TrainingPage(QWidget):
         observation_tokens = {"id", "編號", "编号", "樣本id", "样本id", "sampleid", "observationid"}
         group_tokens = {"groupid", "subjectid", "個體id", "个体id", "受試者id", "受试者id"}
         suggested_observation = False
+        explicit_group = any(
+            "".join(character.lower() for character in column if character.isalnum()) in group_tokens
+            for (_sheet, column) in self.column_role_boxes
+        )
         suggested_group = False
+        if not explicit_group:
+            # An explicit group column wins; otherwise a repeated date / batch does.
+            suggested_group = self._suggest_repeated_measure_group()
         for (sheet, column), combo in self.column_role_boxes.items():
             normalized = "".join(character.lower() for character in column if character.isalnum())
             if not suggested_observation and normalized in observation_tokens:
@@ -2421,6 +2643,34 @@ class TrainingPage(QWidget):
                         tr("Suggested as the Group ID from the column name — please confirm.")
                     )
                     suggested_group = True
+
+    def _suggest_repeated_measure_group(self) -> bool:
+        """Make a repeated date / batch / tank column the Group ID.
+
+        Several rows measured on the same day share weather, biomass and the
+        same calibration; scored with a random split they leak into each other
+        and inflate R². Grouping by that column keeps each day on one side.
+        """
+
+        assert self.bundle is not None
+        for (sheet, column), combo in self.column_role_boxes.items():
+            normalized = "".join(character.lower() for character in column if character.isalnum())
+            if normalized not in REPEATED_MEASURE_TOKENS:
+                continue
+            column_profile = self.bundle.sheets[sheet].profile.column_profiles[column]
+            repeated = 1 < column_profile.unique_values < column_profile.non_missing
+            index = combo.findData("group_id")
+            if repeated and index >= 0 and column_profile.missing == 0:
+                combo.setCurrentIndex(index)
+                combo.setToolTip(
+                    tr(
+                        "Suggested as the Group ID: several rows share the same value, so "
+                        "they are not independent. Rows of one group are kept together "
+                        "when splitting. Set it back to Skip if every row is independent."
+                    )
+                )
+                return True
+        return False
 
     def _sheet_role_changed(self, sheet: str) -> None:
         if self.bundle is None:
@@ -2444,6 +2694,7 @@ class TrainingPage(QWidget):
                     combo.setCurrentIndex(0)
             self._role_change_guard = False
         self._invalidate_experiments()
+        self._refresh_group_status()
 
     def _invalidate_experiments(self) -> None:
         self.selection_memory.update({record.stable_key: record.selected for record in self.catalog.records})
@@ -2546,6 +2797,7 @@ class TrainingPage(QWidget):
             }
         )
         confirmed = sum(record.structure_confirmed for record in self.catalog.selected_records)
+        self._refresh_settings_visibility()
         self.combo_label.setText(
             tr(
                 "{selected:,} of {total:,} selected; {confirmed:,} structure(s) confirmed",
@@ -2584,8 +2836,17 @@ class TrainingPage(QWidget):
                 continue
             return candidate
 
+    def _selected_losses(self) -> tuple[str, ...]:
+        """Ticked losses; a run without a loss-configurable network needs none."""
+
+        ticked = tuple(key for key, check in self.loss_checks.items() if check.isChecked())
+        uses_losses = any(
+            model_id in LOSS_CONFIGURABLE_MODEL_IDS for model_id in self._selected_model_ids()
+        )
+        return ticked if ticked or uses_losses else ("mse",)
+
     def collect_config(self) -> EvaluationConfig:
-        strategy = self.strategy_combo.currentData()
+        strategy = self._current_strategy()
         cv_strategy = strategy in {
             EvaluationStrategy.NESTED_CV,
             EvaluationStrategy.EXTERNAL_VALIDATION,
@@ -2625,10 +2886,14 @@ class TrainingPage(QWidget):
             batch_size=self.batch_spin.value(),
             learning_rate=self.learning_rate_spin.value(),
             model_multiplier=self.model_multiplier_spin.value(),
+            model_size_mode=self.model_size_combo.currentData(),
+            holdout_chronological=(
+                strategy == EvaluationStrategy.HOLDOUT and self.chronological_check.isChecked()
+            ),
             repetitions=self.repetitions_spin.value(),
-            validation_ratio=self.validation_spin.value(),
+            validation_ratio=self.validation_spin.value() / 100.0,
             selected_scalers=tuple(key for key, check in self.scaler_checks.items() if check.isChecked()),
-            selected_losses=tuple(key for key, check in self.loss_checks.items() if check.isChecked()),
+            selected_losses=self._selected_losses(),
             augmentation_policy=augmentation_policy,
             selected_augmentations=selected_augmentations,
             augmentation_repeats=self.augmentation_repeats_spin.value(),
@@ -2860,8 +3125,11 @@ class RegressionV4MainWindow(QMainWindow):
 def launch(argv: Sequence[str] | None = None) -> int:
     import i18n
 
+    from app.wheel_guard import install_wheel_guard
+
     i18n.initialize()
     app = QApplication(list(argv or []))
+    install_wheel_guard(app)
     window = RegressionV4MainWindow()
     window.show()
     return app.exec()

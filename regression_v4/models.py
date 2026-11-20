@@ -48,6 +48,32 @@ NEURAL_MODEL_IDS = {
 LOSS_CONFIGURABLE_MODEL_IDS = NEURAL_MODEL_IDS - {"realmlp", "modern_nca"}
 
 
+CAPACITY_REFERENCE_ROWS = 500
+"""Training-row count at which the preset network widths are used unchanged."""
+
+
+def adaptive_capacity_scale(n_rows: int | None) -> float:
+    """Width scale for neural models that grows with the real training rows.
+
+    Capacity follows the square root of the sample count, the usual rate at
+    which a nonparametric estimator can afford more effective parameters, and is
+    clipped so tiny folds never collapse a network and large tables never blow
+    it up. 120 rows -> x0.5, 500 -> x1.0, 2000 -> x2.0, 4500+ -> x3.0.
+    """
+
+    if not n_rows or n_rows <= 0:
+        return 1.0
+    return float(min(3.0, max(0.5, (float(n_rows) / CAPACITY_REFERENCE_ROWS) ** 0.5)))
+
+
+def adaptive_min_samples_leaf(n_rows: int | None) -> int:
+    """Leaf size for bagged trees: at least 2, growing like sqrt(n) / 6."""
+
+    if not n_rows or n_rows <= 0:
+        return 2
+    return int(max(2, min(50, round((float(n_rows) ** 0.5) / 6.0))))
+
+
 def infer_feature_groups(input_columns: tuple[str, ...]) -> tuple[tuple[int, ...], ...]:
     grouped: dict[str, list[int]] = {}
     for index, column in enumerate(input_columns):
@@ -335,6 +361,8 @@ class LegacyTorchRegressor:
         self.learning_rate = learning_rate
         self.validation_ratio = validation_ratio
         self.model_multiplier = model_multiplier
+        self.model_size_mode = "fixed"
+        self.capacity_rows: int | None = None
         self.loss_id = loss_id
         self.input_columns: tuple[str, ...] = ()
         self.feature_structure: str | None = None
@@ -342,6 +370,13 @@ class LegacyTorchRegressor:
         self.architecture_parameters: dict[str, Any] = {}
         self.model_: Any = None
         self.trained_epochs_: int | None = None
+        self.effective_multiplier_: float | None = None
+
+    def _effective_multiplier(self, fallback_rows: int) -> float:
+        multiplier = float(self.model_multiplier)
+        if getattr(self, "model_size_mode", "fixed") == "auto":
+            multiplier *= adaptive_capacity_scale(self.capacity_rows or fallback_rows)
+        return multiplier
 
     def fit(self, X: Any, y: Any) -> "LegacyTorchRegressor":
         import numpy as np
@@ -369,6 +404,8 @@ class LegacyTorchRegressor:
             np.arange(len(features)), test_size=self.validation_ratio, random_state=self.random_seed
         )
         seed_everything(self.random_seed, deterministic=True)
+        multiplier = self._effective_multiplier(len(features))
+        self.effective_multiplier_ = multiplier
         if self.architecture_id == "FTTransformer" and torch.cuda.is_available():
             torch.backends.cuda.enable_flash_sdp(False)
             torch.backends.cuda.enable_mem_efficient_sdp(False)
@@ -390,13 +427,13 @@ class LegacyTorchRegressor:
                 self.architecture_id,
                 features.shape[1],
                 targets.shape[1],
-                self.model_multiplier,
+                multiplier,
                 infer_feature_groups(self.input_columns),
                 self.architecture_parameters,
             ).to(DEVICE)
         else:
             designed = design_architectures(
-                features.shape[1], targets.shape[1], len(train_index), (self.architecture_id,), self.model_multiplier
+                features.shape[1], targets.shape[1], len(train_index), (self.architecture_id,), multiplier
             )
             architecture = designed.get(self.architecture_id, ArchitectureSpec(self.architecture_id, {}))
             model = build_model(architecture, features.shape[1], targets.shape[1]).to(DEVICE)
@@ -712,6 +749,85 @@ class ModernNCARegressor(BaseEstimator, RegressorMixin):
         return output.ravel() if output.shape[1] == 1 else output
 
 
+TABPFN_WEIGHTS_FILENAME = "tabpfn-v2-regressor.ckpt"
+
+
+def configure_tabpfn_environment() -> str:
+    """Point TabPFN at the project's weight folder before the package is imported.
+
+    The weights then live beside the program, so copying the project folder to an
+    offline machine carries them along. A value the user already set wins.
+    """
+
+    import os
+
+    from project_paths import TABPFN_WEIGHTS_ROOT
+
+    os.environ.setdefault("TABPFN_MODEL_CACHE_DIR", str(TABPFN_WEIGHTS_ROOT))
+    os.environ.setdefault("TABPFN_DISABLE_TELEMETRY", "1")
+    os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+    return os.environ["TABPFN_MODEL_CACHE_DIR"]
+
+
+class TabPFNV2Regressor(BaseEstimator, RegressorMixin):
+    """TabPFN with the version-2 weights, which need no account or licence login.
+
+    Newer TabPFN releases default to the 2.5+ weights, whose download is gated
+    behind a browser login and licence acceptance. The v2 weights are hosted in
+    an ungated Hugging Face repository, so requesting ``ModelVersion.V2``
+    explicitly keeps the current, maintained package while avoiding registration.
+    TabPFN predicts one target per model, so several outputs get one model each.
+    """
+
+    def __init__(self, random_seed: int = 42, n_outputs: int = 1, n_estimators: int = 8) -> None:
+        self.random_seed = random_seed
+        self.n_outputs = n_outputs
+        self.n_estimators = n_estimators
+        self.models_: list[Any] | None = None
+
+    def fit(self, X: Any, y: Any) -> "TabPFNV2Regressor":
+        import numpy as np
+
+        weights_folder = configure_tabpfn_environment()
+        from tabpfn import TabPFNRegressor
+        from tabpfn.constants import ModelVersion
+        from regression_core import DEVICE
+
+        features = np.asarray(X, dtype=np.float32)
+        targets = np.asarray(y, dtype=np.float32)
+        if targets.ndim == 1:
+            targets = targets.reshape(-1, 1)
+        models: list[Any] = []
+        for column in range(targets.shape[1]):
+            model = TabPFNRegressor.create_default_for_version(
+                ModelVersion.V2,
+                device=DEVICE.type,
+                random_state=int(self.random_seed) + column,
+                n_estimators=int(self.n_estimators),
+            )
+            try:
+                model.fit(features, targets[:, column])
+            except Exception as exc:  # The first use downloads ~45 MB of weights.
+                raise RuntimeError(
+                    f"TabPFN v2 could not start ({type(exc).__name__}: {exc}). On first use it "
+                    f"downloads {TABPFN_WEIGHTS_FILENAME} (no account needed) into {weights_folder}; "
+                    "connect once, or copy that file there by hand on an offline machine."
+                ) from exc
+            models.append(model)
+        self.models_ = models
+        return self
+
+    def predict(self, X: Any) -> Any:
+        import numpy as np
+
+        if not self.models_:
+            raise RuntimeError("The model has not been fit")
+        features = np.asarray(X, dtype=np.float32)
+        columns = [np.asarray(model.predict(features), dtype=float) for model in self.models_]
+        output = np.column_stack(columns)
+        return output.ravel() if output.shape[1] == 1 else output
+
+
 def _single_or_multi(factory: Callable[[], Any], n_outputs: int) -> Any:
     estimator = factory()
     return estimator if n_outputs == 1 else MultiOutputRegressor(estimator)
@@ -859,10 +975,24 @@ def _lightgbm_capability() -> ModelCapability:
     )
 
 
+def _tabpfn_capability() -> ModelCapability:
+    if importlib.util.find_spec("tabpfn") is None:
+        return ModelCapability(
+            "tabpfn", "TabPFN v2", ModelAvailability.OPTIONAL_MISSING,
+            "Install optional package 'tabpfn' to activate the TabPFN v2 adapter", None,
+        )
+    return ModelCapability(
+        "tabpfn", "TabPFN v2", ModelAvailability.OPTIONAL_AVAILABLE,
+        "Pretrained TabPFN with the registration-free v2 weights",
+        lambda seed, outputs: TabPFNV2Regressor(seed, outputs),
+    )
+
+
 def model_registry() -> tuple[ModelCapability, ...]:
     models = _core_capabilities()
     models.extend(
         [
+            _tabpfn_capability(),
             _tabm_capability(),
             _realmlp_capability(),
             _catboost_capability(),
@@ -894,6 +1024,7 @@ def model_configuration(model_id: str) -> str:
         "mlp_embeddings": "learned per-feature numerical embeddings + MLP",
         "ft_transformer": "numerical feature tokens + Transformer encoder",
         "modern_nca": "deep embedding, stochastic neighbor pool during training, full reference neighborhood at inference",
+        "tabpfn": "TabPFN v2 weights (no registration), n_estimators=8, one model per target",
         "tabm": "official TabM defaults, k=32 when optional package is installed",
         "realmlp": "pytabkit RealMLP tuned-default regressor, n_cv=1, n_refit=0",
         "catboost": "iterations=300, depth=6, learning_rate=0.05",
@@ -916,6 +1047,9 @@ def create_model(
         raise RuntimeError(f"{capability.display_name} is not active: {capability.reason}")
     assert capability.factory is not None
     model = capability.factory(random_seed, n_outputs)
+    options = dict(training_options or {})
+    adaptive = options.get("model_size_mode") == "auto"
+    capacity_rows = options.get("capacity_rows")
     if isinstance(model, LegacyTorchRegressor) and training_options:
         for name in (
             "epochs",
@@ -924,6 +1058,8 @@ def create_model(
             "learning_rate",
             "validation_ratio",
             "model_multiplier",
+            "model_size_mode",
+            "capacity_rows",
             "loss_id",
             "input_columns",
             "feature_structure",
@@ -934,6 +1070,12 @@ def create_model(
         if model_parameters:
             model.architecture_parameters.update(model_parameters)
     else:
+        if adaptive and isinstance(model, ModernNCARegressor):
+            scale = adaptive_capacity_scale(capacity_rows)
+            model.hidden_dim = max(16, round(64 * scale))
+            model.embedding_dim = max(8, round(16 * scale))
+        if adaptive and isinstance(model, (RandomForestRegressor, ExtraTreesRegressor)):
+            model.set_params(min_samples_leaf=adaptive_min_samples_leaf(capacity_rows))
         if isinstance(model, (RealMLPRegressorAdapter, ModernNCARegressor)) and training_options:
             for source, destination in (
                 ("epochs", "epochs"),

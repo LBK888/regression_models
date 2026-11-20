@@ -27,6 +27,10 @@ LIBRARY_INDEX_PATH = MODEL_LIBRARY_ROOT / "library.json"
 #: Batch inference and validation reports.
 REPORTS_ROOT = PROJECT_ROOT / "reports"
 
+#: Downloaded pretrained weights (TabPFN v2). Kept beside the program so an
+#: offline machine only needs the folder copied over.
+TABPFN_WEIGHTS_ROOT = PROJECT_ROOT / "pretrained" / "tabpfn"
+
 #: User preferences that are not tied to one model, such as the UI language.
 SETTINGS_PATH = PROJECT_ROOT / "settings.json"
 

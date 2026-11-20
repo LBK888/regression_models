@@ -35,6 +35,7 @@ from .batch_page import BatchPage
 from .inference_page import InferencePage
 from .library_page import LibraryPage
 from .theme import C, apply_theme
+from .wheel_guard import install_wheel_guard
 
 
 class MainWindow(QMainWindow):
@@ -162,6 +163,7 @@ def launch(argv: Sequence[str] | None = None) -> int:
     i18n.initialize()
     app = QApplication(list(argv if argv is not None else sys.argv))
     apply_theme(app)
+    install_wheel_guard(app)
     window = MainWindow()
     window.show()
     return app.exec()

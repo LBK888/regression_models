@@ -12,6 +12,9 @@ reports/
 models/library.json
 models/imported/
 
+# Downloaded pretrained weights (TabPFN v2, ~45 MB), fetched on first use.
+pretrained/
+
 # Per-machine preferences, such as the chosen interface language.
 settings.json
 

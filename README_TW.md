@@ -52,13 +52,25 @@ start.bat
 拖入 CSV 或 Excel 檔，為每個工作表與欄位指定角色，產生要比較的輸入／輸出排列組合，
 再選擇要比較的模型、scaler、loss 與 augmentation。
 
-**評估策略**：兩階段 CV Screening 搭配可選的 repeated nested Confirmation、
-單次 Train/Test holdout、以獨立外部資料集驗證，或只做 final fit 不評估。
+**評估方式**：交叉驗證（可再加一階段重複巢狀交叉驗證複核）、單次訓練／測試切分
+（隨機，或以最新的資料列當測試集，用來量測隨時間的漂移）、用另一份獨立資料檔評分，
+或只訓練不評分。設定頁只會顯示目前選項實際會用到的欄位。
+
+**Group ID**：如果多筆資料來自同一天、同一缸或同一個體，請把該欄設為 Group ID，
+同一組的資料就不會同時出現在訓練與測試中。名為 Date／日期／Batch／Tank 等且有重複值的欄位
+會被自動建議為 Group ID；沒有設定時，設定頁會顯示警告。
+
+**資料檢查**：載入時，稽核欄會標出明顯的極端值（例如輸入錯誤）、常數欄位、
+恰好是另一欄倍數的欄位，以及幾乎重複的欄位。
 
 **模型家族**：Mean 基準、Ridge、PLS、SVR (RBF)、Random Forest、Extra Trees、
-Deep / Wide / Residual / Multi-branch / Bottleneck MLP、CNN1D、ResNet1D、Grouped Fusion、
-Numerical-Embedding MLP、FT-Transformer、ModernNCA，
-以及選配的 TabM、RealMLP、CatBoost、XGBoost、LightGBM。
+CatBoost、XGBoost、LightGBM、TabPFN v2、Deep / Wide / Residual / Multi-branch / Bottleneck MLP、
+Numerical-Embedding MLP、FT-Transformer、ModernNCA、TabM、RealMLP、CNN1D、ResNet1D、Grouped Fusion。
+TabPFN 使用不需註冊帳號的 v2 權重，第一次使用時下載一次（約 45 MB）到 `pretrained/tabpfn/`。
+
+**模型大小**：預設「自動」——神經網路寬度依真實訓練筆數的平方根縮放
+（500 筆 = 預設寬度，限制在 ×0.5～×3），bagging 樹模型的最小葉節點也隨資料量增加。
+選「固定」則維持預設大小。
 
 **Augmentation**：C-Mixup、calibrated feature noise、spectral perturbation、
 training-time feature masking 與 FOMA。所有方法只作用於當前 fold 的 training partition，

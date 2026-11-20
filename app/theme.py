@@ -38,8 +38,8 @@ QGroupBox {{
     background-color: {C['surface']};
     border: 1px solid {C['border']};
     border-radius: 10px;
-    margin-top: 14px;
-    padding: 12px 10px 10px 10px;
+    margin-top: 12px;
+    padding: 10px 8px 8px 8px;
     font-weight: bold;
     color: {C['accent2']};
 }}
@@ -55,10 +55,14 @@ QGroupBox::title {{
 QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit, QPlainTextEdit, QTextEdit {{
     background-color: {C['panel']};
     border: 1px solid {C['border']};
-    border-radius: 7px;
-    padding: 5px 10px;
+    border-radius: 6px;
+    padding: 2px 8px;
     color: {C['text']};
-    min-height: 26px;
+    min-height: 22px;
+}}
+QComboBox:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled, QLineEdit:disabled {{
+    color: {C['muted']};
+    background-color: {C['surface']};
 }}
 QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover, QLineEdit:hover {{
     border-color: {C['muted']};
@@ -79,10 +83,10 @@ QPushButton {{
     background-color: {C['accent']};
     color: {C['white']};
     border: none;
-    border-radius: 8px;
-    padding: 8px 18px;
+    border-radius: 7px;
+    padding: 5px 14px;
     font-weight: bold;
-    min-height: 32px;
+    min-height: 24px;
 }}
 QPushButton:hover {{ background-color: {C['accent2']}; }}
 QPushButton:pressed {{ background-color: #4a5bd4; }}
@@ -93,7 +97,36 @@ QPushButton#secondaryBtn {{
     border: 1px solid {C['border']};
 }}
 QPushButton#secondaryBtn:hover {{ border-color: {C['muted']}; background-color: #2a2e45; }}
+QPushButton#sectionToggle {{
+    background-color: {C['surface']};
+    color: {C['accent2']};
+    border: 1px solid {C['border']};
+    border-radius: 10px;
+    text-align: left;
+    padding: 6px 12px;
+}}
+QPushButton#sectionToggle:hover {{ border-color: {C['muted']}; }}
+QPushButton#sectionToggle:checked {{ border-color: {C['accent']}; }}
 
+QLabel, QCheckBox, QRadioButton {{ background-color: transparent; }}
+QWidget#plain {{ background-color: transparent; }}
+QLabel#hint {{ color: {C['muted']}; }}
+QLabel#sectionTitle {{ color: {C['accent2']}; font-weight: bold; padding-top: 2px; }}
+QLabel#ok {{ color: {C['success']}; }}
+QLabel#warning {{ color: {C['warning']}; }}
+QCheckBox:disabled, QRadioButton:disabled, QLabel:disabled {{ color: {C['muted']}; }}
+QRadioButton {{ spacing: 7px; }}
+QRadioButton::indicator {{
+    width: 14px; height: 14px;
+    border: 1px solid {C['border']};
+    border-radius: 8px;
+    background: {C['panel']};
+}}
+QRadioButton::indicator:checked {{
+    background: qradialgradient(cx:0.5, cy:0.5, radius:0.5, fx:0.5, fy:0.5,
+        stop:0 {C['white']}, stop:0.35 {C['white']}, stop:0.45 {C['accent']}, stop:1 {C['accent']});
+    border-color: {C['accent']};
+}}
 QCheckBox {{ spacing: 7px; }}
 QCheckBox::indicator {{
     width: 15px; height: 15px;
@@ -112,7 +145,7 @@ QTabBar::tab {{
     border-bottom: none;
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;
-    padding: 8px 18px;
+    padding: 6px 14px;
     margin-right: 2px;
     font-weight: bold;
 }}

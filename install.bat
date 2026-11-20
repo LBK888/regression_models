@@ -152,9 +152,10 @@ echo   Installation complete.
 echo   Run start.bat to launch the program.
 echo ==========================================
 echo.
-echo   Optional model adapters (CatBoost, XGBoost, LightGBM, TabM, RealMLP)
-echo   are commented out in requirements.txt. Uncomment a line and run this
-echo   installer again to add that model family to the training tab.
+echo   Extra model adapters (CatBoost, XGBoost, LightGBM, TabM, RealMLP,
+echo   TabPFN v2) are installed from requirements.txt. TabPFN v2 downloads
+echo   its weights (~45 MB, no account needed) into pretrained\tabpfn the
+echo   first time it is used.
 echo.
 pause
 exit /b 0

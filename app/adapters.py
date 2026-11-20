@@ -389,9 +389,13 @@ def _is_v4_bundle(obj: Any) -> bool:
 
 
 def _v4_predictor(bundle: Any) -> Predictor:
+    from regression_v4.domain import per_column_labels
+
     experiment = bundle.experiment
-    features = tuple(experiment.input_labels or experiment.input_columns)
-    targets = tuple(experiment.output_labels or experiment.output_columns)
+    # Labels are stored per selection unit; a Combined input has one label for
+    # many columns, so map them back to one name per model input.
+    features = per_column_labels(experiment.input_labels, experiment.input_columns)
+    targets = per_column_labels(experiment.output_labels, experiment.output_columns)
     estimator = type(getattr(bundle, "model", None)).__name__
     return Predictor(
         kind="v4_bundle",

@@ -85,6 +85,22 @@ def infer_feature_metadata(
     return structure, tuple(groups)
 
 
+def per_column_labels(labels: Sequence[str], columns: Sequence[str]) -> tuple[str, ...]:
+    """Map selection-unit labels to one label per column.
+
+    ``input_labels`` holds one label per *selection unit*, so a Combined input of
+    nine columns has a single label such as "Sheet Combined Input". Anything
+    that needs one name per model input must not use it directly. When the
+    counts differ, fall back to the column names without their ``Sheet::``
+    prefix, or to the full canonical names if stripping would create duplicates.
+    """
+
+    if labels and len(labels) == len(columns):
+        return tuple(str(label) for label in labels)
+    short = tuple(str(column).rsplit("::", 1)[-1] for column in columns)
+    return short if len(set(short)) == len(short) else tuple(str(column) for column in columns)
+
+
 @dataclass(frozen=True)
 class TargetTask:
     """A comparison boundary: models are ranked only inside one output set."""
@@ -151,6 +167,16 @@ class ExperimentRecord:
         inputs = self.input_labels or self.input_columns
         outputs = self.output_labels or self.output_columns
         return f"{' + '.join(inputs)} -> {' + '.join(outputs)}"
+
+    @property
+    def input_column_labels(self) -> tuple[str, ...]:
+        """One label per model input column, for inference forms and metadata."""
+
+        return per_column_labels(self.input_labels, self.input_columns)
+
+    @property
+    def output_column_labels(self) -> tuple[str, ...]:
+        return per_column_labels(self.output_labels, self.output_columns)
 
     def with_selected(self, selected: bool) -> "ExperimentRecord":
         return replace(self, selected=bool(selected))
@@ -267,6 +293,8 @@ class EvaluationConfig:
     batch_size: int = 32
     learning_rate: float = 0.001
     model_multiplier: float = 1.0
+    model_size_mode: str = "auto"
+    holdout_chronological: bool = False
     repetitions: int = 1
     validation_ratio: float = 0.20
     selected_scalers: tuple[str, ...] = ("standard",)
@@ -299,6 +327,8 @@ class EvaluationConfig:
             raise ValueError("epochs/patience must be positive and batch_size must be at least 2")
         if self.learning_rate <= 0 or self.model_multiplier <= 0:
             raise ValueError("learning_rate and model_multiplier must be positive")
+        if self.model_size_mode not in {"auto", "fixed"}:
+            raise ValueError("model_size_mode must be 'auto' or 'fixed'")
         if self.repetitions < 1:
             raise ValueError("repetitions must be at least 1")
         if not 0.05 <= self.validation_ratio <= 0.50:

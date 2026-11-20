@@ -9,16 +9,20 @@ openpyxl
 joblib
 PyQt6
 
-# Optional model adapters. They stay commented out because each one only adds
-# extra model families to the benchmark; the application is complete without
-# them. Uncomment a line and re-run install.bat to activate that adapter — it
-# then appears as selectable in the training tab.
-# catboost              # CatBoost gradient boosting
-# xgboost               # XGBoost gradient boosting
-# lightgbm              # LightGBM gradient boosting
-# tabm                  # TabM parameter-efficient ensemble
-# pytabkit              # RealMLP tabular MLP
-#
-# TabPFN is deliberately absent: its weights require account registration and
-# an interactive login before first use, which does not fit an offline desktop
-# workflow. See docs/MERGE_NOTES.md.
+# Extra model families for the benchmark, installed by default. Each one only
+# adds model families to the comparison, so if a package ever fails to install
+# on a machine, comment its line out: the adapter then shows as "not installed"
+# in the training tab and everything else keeps working.
+catboost              # CatBoost gradient boosting
+xgboost               # XGBoost gradient boosting
+lightgbm              # LightGBM gradient boosting
+tabm                  # TabM parameter-efficient ensemble
+pytabkit              # RealMLP tabular MLP
+
+# TabPFN, used with its version-2 weights only. Since TabPFN 2.5 the default
+# weights are gated behind an account login and licence acceptance; the v2
+# weights are not, and the adapter requests them explicitly, so no registration
+# is ever needed. The weights (~45 MB) download once into pretrained/tabpfn/.
+# (The old tabpfn 2.x package itself cannot be used here: it pins
+# scikit-learn<1.7 and pandas<3, which have no Python 3.14 wheels.)
+tabpfn>=6.0,<11       # TabPFN v2 pretrained tabular model

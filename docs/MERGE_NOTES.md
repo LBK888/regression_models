@@ -65,6 +65,27 @@ first-use download"*。也就是說，第一次使用必須註冊／登入 Prior
 其餘選配模型（TabM、RealMLP、CatBoost、XGBoost、LightGBM）不需登入，保留為
 `requirements.txt` 中註解掉的選項。
 
+### 3.1 之後：以 TabPFN **v2 權重** 重新加入（免註冊）
+
+需要登入的其實只有 **2.5 以後的權重**，不是 TabPFN 套件本身：
+
+| 權重 | Hugging Face repo | gated | 新版套件的處理 |
+| --- | --- | --- | --- |
+| v2 | `Prior-Labs/TabPFN-v2-reg` | **否**（匿名可下載） | 直接下載，失敗時還有 direct URL 備援 |
+| 2.5 / 2.6 / 3 / 3.5 | `Prior-Labs/tabpfn_2_5` 等 | 是 | `browser_auth.ensure_license_accepted()` 開瀏覽器登入 |
+
+因此 adapter（`models.TabPFNV2Regressor`）沿用目前維護中的套件，但一律以
+`TabPFNRegressor.create_default_for_version(ModelVersion.V2)` 建立模型，永遠不會進入登入流程。
+
+- **不改用舊的 tabpfn 2.x 套件**：它鎖 `scikit-learn<1.7`、`pandas<3`，這兩者在 Python 3.14
+  沒有 wheel，pip 會嘗試從原始碼編譯而失敗。
+- 權重（約 45 MB）第一次使用時下載到 `pretrained/tabpfn/`（`project_paths.TABPFN_WEIGHTS_ROOT`，
+  已加入 `.gitignore`）。離線機器只要把這個檔案複製過去即可。使用者若自行設定
+  `TABPFN_MODEL_CACHE_DIR`，以使用者的設定為準。
+- TabPFN 一個模型只預測一個目標，多目標時每個目標各一個模型。
+- 儲存的 bundle 會內含權重，每個約 45 MB。
+- Confirmation 階段的調參範圍是 `n_estimators ∈ {4, 8, 16}`。
+
 ---
 
 ## 4. 模型保留規則：前三名 + R² 閘門

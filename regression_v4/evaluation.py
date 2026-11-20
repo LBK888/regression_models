@@ -222,6 +222,34 @@ def _augment_scaled_training(
         target_parts.append(new_y)
     return np.concatenate(feature_parts), np.concatenate(target_parts)
 
+def training_options(
+    config: EvaluationConfig,
+    experiment: ExperimentRecord,
+    loss_id: str,
+    capacity_rows: int,
+) -> dict[str, Any]:
+    """Options every model factory call receives.
+
+    ``capacity_rows`` is the number of real training rows *before*
+    augmentation, so synthetic rows never inflate the adaptive model size.
+    """
+
+    return {
+        "epochs": config.epochs,
+        "patience": config.patience,
+        "batch_size": config.batch_size,
+        "learning_rate": config.learning_rate,
+        "validation_ratio": config.validation_ratio,
+        "model_multiplier": config.model_multiplier,
+        "model_size_mode": config.model_size_mode,
+        "capacity_rows": int(capacity_rows),
+        "loss_id": loss_id if loss_id != "native" else "mse",
+        "input_columns": experiment.input_columns,
+        "feature_structure": experiment.feature_structure.value,
+        "structure_confirmed": experiment.structure_confirmed,
+    }
+
+
 def _ensure_prediction_matrix(prediction: np.ndarray, n_outputs: int) -> np.ndarray:
     output = np.asarray(prediction, dtype=float)
     if output.ndim == 1:
@@ -293,18 +321,7 @@ def evaluate_screening(
                     model_id,
                     seed,
                     targets.shape[1],
-                    {
-                        "epochs": effective.epochs,
-                        "patience": effective.patience,
-                        "batch_size": effective.batch_size,
-                        "learning_rate": effective.learning_rate,
-                        "validation_ratio": effective.validation_ratio,
-                        "model_multiplier": effective.model_multiplier,
-                        "loss_id": loss_id if loss_id != "native" else "mse",
-                        "input_columns": experiment.input_columns,
-                        "feature_structure": experiment.feature_structure.value,
-                        "structure_confirmed": experiment.structure_confirmed,
-                    },
+                    training_options(effective, experiment, loss_id, len(split.train)),
                 )
                 fit_y = y_train.ravel() if targets.shape[1] == 1 else y_train
                 model.fit(X_train, fit_y)
@@ -334,7 +351,7 @@ def evaluate_screening(
                 folds=tuple(predictions),
                 metrics=calculate_regression_metrics(all_truth, all_prediction, target_names),
                 evidence_label="Out-of-fold",
-                configuration=f"{model_configuration(model_id)}; loss={loss_id}; scaler={scaler_id}; augmentation={augmentation_id}; repetitions={effective.repetitions}",
+                configuration=f"{model_configuration(model_id)}; loss={loss_id}; scaler={scaler_id}; augmentation={augmentation_id}; repetitions={effective.repetitions}; model_size={effective.model_size_mode}",
                 loss_id=loss_id,
                 scaler_id=scaler_id,
                 augmentation_id=augmentation_id,
@@ -370,7 +387,9 @@ def evaluate_holdout(
     if len(features) != identity.size:
         raise ValueError("DatasetIdentity length must match X/y rows")
     effective = config or EvaluationConfig(selected_losses=("mse",))
-    split = holdout_split(identity, test_size, random_seed)
+    split = holdout_split(
+        identity, test_size, random_seed, chronological=effective.holdout_chronological
+    )
     assert_no_group_leakage(split, identity)
     names = {item.model_id: item.display_name for item in model_registry()}
     total = progress_total or evaluation_run_count(model_ids, effective, 1, experiment)
@@ -403,18 +422,7 @@ def evaluate_holdout(
                 model_id,
                 seed,
                 targets.shape[1],
-                {
-                    "epochs": effective.epochs,
-                    "patience": effective.patience,
-                    "batch_size": effective.batch_size,
-                    "learning_rate": effective.learning_rate,
-                    "validation_ratio": effective.validation_ratio,
-                    "model_multiplier": effective.model_multiplier,
-                    "loss_id": loss_id if loss_id != "native" else "mse",
-                    "input_columns": experiment.input_columns,
-                    "feature_structure": experiment.feature_structure.value,
-                    "structure_confirmed": experiment.structure_confirmed,
-                },
+                training_options(effective, experiment, loss_id, len(split.train)),
             )
             model.fit(X_train, y_train.ravel() if targets.shape[1] == 1 else y_train)
             trained_epochs = getattr(model, "trained_epochs_", None)
@@ -446,7 +454,7 @@ def evaluate_holdout(
                 tuple(predictions),
                 metrics,
                 "Holdout test",
-                f"{model_configuration(model_id)}; loss={loss_id}; scaler={scaler_id}; augmentation={augmentation_id}; repetitions={effective.repetitions}",
+                f"{model_configuration(model_id)}; loss={loss_id}; scaler={scaler_id}; augmentation={augmentation_id}; repetitions={effective.repetitions}; model_size={effective.model_size_mode}",
                 loss_id,
                 scaler_id,
                 augmentation_id,
@@ -650,18 +658,7 @@ def fit_final_models(
                 model_id,
                 seed,
                 targets.shape[1],
-                {
-                    "epochs": effective.epochs,
-                    "patience": effective.patience,
-                    "batch_size": effective.batch_size,
-                    "learning_rate": effective.learning_rate,
-                    "validation_ratio": effective.validation_ratio,
-                    "model_multiplier": effective.model_multiplier,
-                    "loss_id": loss_id if loss_id != "native" else "mse",
-                    "input_columns": experiment.input_columns,
-                    "feature_structure": experiment.feature_structure.value,
-                    "structure_confirmed": experiment.structure_confirmed,
-                },
+                training_options(effective, experiment, loss_id, len(features)),
                 dict(model_parameters or {}),
             )
             model.fit(scaled_X, scaled_y.ravel() if targets.shape[1] == 1 else scaled_y)
@@ -767,9 +764,9 @@ def bundle_metadata(
         "model_parameters": dict(bundle.model_parameters or {}),
         "configuration": model_configuration(bundle.model_id),
         "feature_names": list(experiment.input_columns),
-        "feature_labels": list(experiment.input_labels or experiment.input_columns),
+        "feature_labels": list(experiment.input_column_labels),
         "target_names": list(experiment.output_columns),
-        "target_labels": list(experiment.output_labels or experiment.output_columns),
+        "target_labels": list(experiment.output_column_labels),
         "feature_structure": experiment.feature_structure.value,
         "feature_groups": list(experiment.feature_groups),
         "training_rows": bundle.training_rows,

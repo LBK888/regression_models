@@ -55,14 +55,29 @@ Drop in a CSV or Excel file, assign a role to each sheet and column, generate th
 input/output combinations you want to compare, then pick the models, scalers, losses and
 augmentations to benchmark.
 
-**Evaluation strategies**: two-stage CV Screening with optional repeated nested
-Confirmation, a single Train/Test holdout, validation against an independent external
-dataset, or a final fit with no evaluation at all.
+**Evaluation strategies**: cross-validation with an optional second stage of repeated
+nested cross-validation, a single train/test split (random, or the most recent rows as the
+test set to measure drift over time), scoring on a separate data file, or training with no
+score at all. The settings page shows only the fields the current choices use.
+
+**Group ID**: when several rows come from the same day, tank or subject, name that column
+as the Group ID so its rows are never split between training and testing. A repeated
+column called Date / 日期 / Batch / Tank (and similar) is suggested automatically, and the
+settings page warns when no Group ID is set.
+
+**Data checks**: on loading, the Audit column flags gross outliers (for example a typo
+far from every other value), constant columns, a column that is an exact multiple of
+another, and near-duplicate columns.
 
 **Model families**: Mean baseline, Ridge, PLS, SVR (RBF), Random Forest, Extra Trees,
-Deep / Wide / Residual / Multi-branch / Bottleneck MLP, CNN1D, ResNet1D, Grouped Fusion,
-Numerical-Embedding MLP, FT-Transformer, ModernNCA — plus optional TabM, RealMLP,
-CatBoost, XGBoost and LightGBM.
+CatBoost, XGBoost, LightGBM, TabPFN v2, Deep / Wide / Residual / Multi-branch / Bottleneck
+MLP, Numerical-Embedding MLP, FT-Transformer, ModernNCA, TabM, RealMLP, CNN1D, ResNet1D and
+Grouped Fusion. TabPFN uses its version-2 weights, which need no account; they download
+once (about 45 MB) into `pretrained/tabpfn/`.
+
+**Model size**: by default ("Auto") neural-network width scales with the square root of
+the real training rows (500 rows = the preset width, clipped to ×0.5–×3), and bagged trees
+grow their minimum leaf size with the data. "Fixed" keeps the preset size.
 
 **Augmentation**: C-Mixup, calibrated feature noise, spectral perturbation, training-time
 feature masking and FOMA, applied only to the current fold's training partition and always
